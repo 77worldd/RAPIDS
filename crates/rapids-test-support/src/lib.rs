@@ -6,10 +6,10 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Byte value at `index` of the canonical test payload. The sequence is a
 /// pure function, so any side can regenerate any window without storing
@@ -91,13 +91,16 @@ struct ServerState {
     options: Mutex<ServerOptions>,
     requests: Mutex<Vec<RequestRecord>>,
     body_counter: AtomicU64,
+    /// Connections accepted but not yet finished: their request records may
+    /// still be pushed.
+    active: AtomicUsize,
 }
 
 /// A running local server. Dropping it stops the accept loop.
 pub struct TestServer {
     base_url: String,
     state: Arc<ServerState>,
-    shutdown: Arc<std::sync::atomic::AtomicBool>,
+    shutdown: Arc<AtomicBool>,
     accept_thread: Option<JoinHandle<()>>,
 }
 
@@ -112,8 +115,9 @@ impl TestServer {
             options: Mutex::new(options),
             requests: Mutex::new(Vec::new()),
             body_counter: AtomicU64::new(0),
+            active: AtomicUsize::new(0),
         });
-        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         let thread_state = state.clone();
         let thread_shutdown = shutdown.clone();
@@ -122,7 +126,13 @@ impl TestServer {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         let state = thread_state.clone();
-                        thread::spawn(move || handle_connection(stream, state));
+                        state.active.fetch_add(1, Ordering::AcqRel);
+                        thread::spawn(move || {
+                            handle_connection(stream, &state);
+                            // The record is pushed by now, so a waiter may
+                            // treat this connection as fully accounted for.
+                            state.active.fetch_sub(1, Ordering::AcqRel);
+                        });
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(2));
@@ -142,7 +152,8 @@ impl TestServer {
 
     /// Full URL under this server for `path` (for example `/payload.bin`).
     pub fn url(&self, path: &str) -> String {
-        format!("{self.base_url}{path}")
+        let base = &self.base_url;
+        format!("{base}{path}")
     }
 
     pub fn set_etag(&self, etag: &str) {
@@ -157,6 +168,28 @@ impl TestServer {
     pub fn clear_requests(&self) {
         self.state.requests.lock().unwrap().clear();
     }
+
+    /// Waits until no connection is mid-request. A client that is killed
+    /// leaves its last connections finishing their writes and pushing their
+    /// records, so byte accounting must wait for this before clearing the log.
+    pub fn wait_idle(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut idle_rounds = 0;
+        while Instant::now() < deadline {
+            // Two consecutive quiet rounds also cover a connection that was
+            // still in the accept backlog on the first look.
+            if self.state.active.load(Ordering::Acquire) == 0 {
+                idle_rounds += 1;
+                if idle_rounds >= 2 {
+                    return true;
+                }
+            } else {
+                idle_rounds = 0;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        false
+    }
 }
 
 impl Drop for TestServer {
@@ -168,7 +201,7 @@ impl Drop for TestServer {
     }
 }
 
-fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) {
+fn handle_connection(mut stream: TcpStream, state: &ServerState) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
     let options = state.options.lock().unwrap().clone();
 
@@ -183,7 +216,6 @@ fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) {
     };
     let mut parts = request_line.split(' ');
     let method = parts.next().unwrap_or("").to_string();
-    let target = parts.next().unwrap_or("/").to_string();
 
     let mut range_header: Option<String> = None;
     let mut if_range_header: Option<String> = None;
@@ -210,9 +242,10 @@ fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) {
     let response: Vec<u8> = match method.as_str() {
         "HEAD" => {
             record.status = 200;
-            head_response(&options)
+            full_response(&options)
         }
         "GET" => {
+            let total = options.total;
             let range = range_header.as_deref().and_then(parse_range_header);
             let validator_matches = match if_range_header.as_deref() {
                 Some(value) => value == options.etag,
@@ -220,39 +253,39 @@ fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) {
             };
             let usable_range = options.ranges && validator_matches && range.is_some();
             match (usable_range, range) {
-                (true, Some((start, _))) if start >= options.total => {
+                (true, Some((start, _))) if start >= total => {
                     record.status = 416;
                     format!(
-                        "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{options.total}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{total}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     )
                     .into_bytes()
                 }
                 (true, Some((start, end))) => {
-                    let resolved_end = end.unwrap_or(options.total.saturating_sub(1))
-                        .min(options.total.saturating_sub(1));
+                    let resolved_end = end
+                        .unwrap_or(total.saturating_sub(1))
+                        .min(total.saturating_sub(1));
                     let length = resolved_end - start + 1;
                     record.status = 206;
                     record.body_len = length;
+                    let etag = &options.etag;
+                    let last_modified = &options.last_modified;
+                    let filename = &options.filename;
                     format!(
-                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{resolved_end}/{options.total}\r\nContent-Length: {length}\r\nETag: {options.etag}\r\nLast-Modified: {options.last_modified}\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{options.filename}\"\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n"
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{resolved_end}/{total}\r\nContent-Length: {length}\r\nETag: {etag}\r\nLast-Modified: {last_modified}\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{filename}\"\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n"
                     )
                     .into_bytes()
                 }
                 _ => {
                     record.status = 200;
-                    record.body_len = options.total;
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {options.total}\r\nETag: {options.etag}\r\nLast-Modified: {options.last_modified}\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{options.filename}\"{}\r\nConnection: close\r\n\r\n",
-                        if options.ranges { "\r\nAccept-Ranges: bytes" } else { "" },
-                    )
-                    .into_bytes()
+                    record.body_len = total;
+                    full_response(&options)
                 }
             }
         }
         _ => {
             record.status = 405;
-            "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                .into_bytes()
+            b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec()
         }
     };
 
@@ -265,7 +298,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) {
         let body_number = state.body_counter.fetch_add(1, Ordering::AcqRel) + 1;
         let flaky = options
             .flaky_every
-            .is_some_and(|every| every > 0 && body_number % every == 0);
+            .is_some_and(|every| every > 0 && body_number.is_multiple_of(u64::from(every)));
         let start = if record.status == 206 {
             parse_range_header(range_header.as_deref().unwrap_or(""))
                 .map(|(start, _)| start)
@@ -307,14 +340,20 @@ fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) {
     state.requests.lock().unwrap().push(record);
 }
 
-fn head_response(options: &ServerOptions) -> Vec<u8> {
+/// The complete-body answer, shared by HEAD and by a GET whose range cannot
+/// be honoured.
+fn full_response(options: &ServerOptions) -> Vec<u8> {
+    let total = options.total;
+    let etag = &options.etag;
+    let last_modified = &options.last_modified;
+    let filename = &options.filename;
+    let accept_ranges = if options.ranges {
+        "\r\nAccept-Ranges: bytes"
+    } else {
+        ""
+    };
     format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {options.total}\r\nETag: {options.etag}\r\nLast-Modified: {options.last_modified}\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{options.filename}\"{}\r\nConnection: close\r\n\r\n",
-        if options.ranges {
-            "\r\nAccept-Ranges: bytes"
-        } else {
-            ""
-        },
+        "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nETag: {etag}\r\nLast-Modified: {last_modified}\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{filename}\"{accept_ranges}\r\nConnection: close\r\n\r\n"
     )
     .into_bytes()
 }
@@ -335,7 +374,7 @@ fn read_request(stream: &mut TcpStream) -> Option<String> {
     if collected.is_empty() {
         return None;
     }
-    String::from_utf8_lossy(&collected).into()
+    Some(String::from_utf8_lossy(&collected).into_owned())
 }
 
 fn parse_range_header(value: &str) -> Option<(u64, Option<u64>)> {
