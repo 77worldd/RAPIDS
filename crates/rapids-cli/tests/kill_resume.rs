@@ -25,7 +25,9 @@ fn confirmed_bytes(runtime: &tokio::runtime::Runtime, workspace: &Workspace) -> 
 fn killed_download_resumes_and_hashes_identically() {
     let total = 100 * 1024 * 1024u64;
     let mut server_options = options(total);
-    server_options.throttle_bps = Some(3 * 1024 * 1024);
+    // 2 MB/s per connection leaves seconds of margin between the halfway
+    // point and natural completion, so the kill never races the last byte.
+    server_options.throttle_bps = Some(2 * 1024 * 1024);
     let server = TestServer::start(server_options);
     let dir = tempfile::tempdir().expect("temp dir");
     let dest = dir.path().join("payload.bin");
@@ -87,6 +89,13 @@ fn killed_download_resumes_and_hashes_identically() {
     );
 
     // --- second run: resume from the part file ---------------------------
+    // The killed process's last connections finish writing their request
+    // records; account for them before the log is cleared, or their bytes
+    // would be counted against the resumed run.
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "the server did not settle after the kill"
+    );
     server.clear_requests();
     let mut second = Command::new(binary)
         .args([
