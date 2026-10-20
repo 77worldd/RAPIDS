@@ -1,0 +1,19 @@
+[package]
+name = "rapids-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "RAPIDS command line download tool"
+
+[[bin]]
+name = "rapids"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rapids-engine = { path = "../rapids-engine" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync"] }
+
+[dev-dependencies]
+rapids-test-support = { path = "../rapids-test-support" }
+tempfile = "3"
