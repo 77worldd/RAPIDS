@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
+use crate::rate::RateLimits;
 use crate::segmenter::Segment;
 
 /// Stop conditions broadcast by the coordinator. Workers re-read them after
@@ -65,6 +66,8 @@ pub(crate) struct DownloadContext {
     pub last_modified: Option<String>,
     pub accepts_ranges: bool,
     pub total: Option<u64>,
+    /// Every bandwidth ceiling that applies to this download.
+    pub limits: RateLimits,
 }
 
 /// Multi-consumer segment queue: workers pull while the coordinator owns
@@ -122,6 +125,7 @@ struct TransferPolicy {
     idle_read_timeout: Duration,
     target: Option<u64>,
     part_path: PathBuf,
+    limits: RateLimits,
 }
 
 /// One worker: pull segments until the queue is empty or a stop flag lands.
@@ -361,6 +365,7 @@ async fn attempt_segment(
         idle_read_timeout: context.config.idle_read_timeout,
         target,
         part_path: context.part_path.clone(),
+        limits: context.limits.clone(),
     };
     let mut cursor = ProgressCursor {
         atomic: progress,
@@ -422,6 +427,17 @@ async fn pump_body(
                     return Err(AttemptFailure::Fatal(EngineError::protocol(
                         "server sent more bytes than the range allows",
                     )));
+                }
+                // Bandwidth is paid for before the bytes land, so the
+                // progress atomic never reports data that the limit has
+                // not allowed yet. The callback keeps a pause or cancel
+                // responsive while a slow bucket is being filled.
+                if !policy
+                    .limits
+                    .acquire_while(length, || !control.borrow().stop_requested())
+                    .await
+                {
+                    return Err(AttemptFailure::Stop);
                 }
                 file.write_all(&bytes[..]).await.map_err(|error| {
                     AttemptFailure::Fatal(EngineError::io(

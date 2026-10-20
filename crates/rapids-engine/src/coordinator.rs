@@ -15,6 +15,7 @@ use crate::http::fetch::{
 };
 use crate::http::{build_client, probe};
 use crate::manifest::{unix_timestamp, Manifest, SegmentState};
+use crate::rate::RateLimits;
 use crate::segmenter::{scaling_decision, tile, ScaleDecision, Segment};
 use crate::workspace::Workspace;
 
@@ -596,6 +597,8 @@ impl Coordinator {
             }
         };
 
+        let limits =
+            RateLimits::compose(self.config.shared_limiter.clone(), self.config.rate_limit_bps);
         let context = Arc::new(DownloadContext {
             client,
             config: self.config.clone(),
@@ -605,6 +608,7 @@ impl Coordinator {
             last_modified: manifest.last_modified.clone(),
             accepts_ranges: manifest.accepts_ranges,
             total: manifest.total_bytes,
+            limits,
         });
         let progress: Arc<Vec<AtomicU64>> = Arc::new(
             manifest

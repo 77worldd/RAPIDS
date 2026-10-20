@@ -1,6 +1,8 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::EngineError;
+use crate::rate::RateLimiter;
 
 /// Tuning knobs for the download engine.
 ///
@@ -39,6 +41,12 @@ pub struct EngineConfig {
     pub progress_interval: Duration,
     /// User-Agent header sent with every request.
     pub user_agent: String,
+    /// Ceiling for this download alone, in bytes per second. `None` or `0`
+    /// leaves it unlimited; a tighter global limiter can still apply.
+    pub rate_limit_bps: Option<u64>,
+    /// Ceiling shared by every running download, supplied by the host so a
+    /// changed global limit reaches downloads that are already running.
+    pub shared_limiter: Option<Arc<RateLimiter>>,
 }
 
 impl Default for EngineConfig {
@@ -59,6 +67,8 @@ impl Default for EngineConfig {
             checkpoint_interval: Duration::from_secs(2),
             progress_interval: Duration::from_millis(500),
             user_agent: format!("rapids/{}", env!("CARGO_PKG_VERSION")),
+            rate_limit_bps: None,
+            shared_limiter: None,
         }
     }
 }
@@ -85,6 +95,11 @@ impl EngineConfig {
         } else {
             self.gain_threshold = self.gain_threshold.clamp(0.0, 1.0);
         }
+        // A zero byte-per-second ceiling is not a useful instruction; it
+        // means the caller wanted no ceiling at all.
+        if self.rate_limit_bps == Some(0) {
+            self.rate_limit_bps = None;
+        }
         Ok(self)
     }
 }
@@ -104,6 +119,8 @@ mod tests {
         assert_eq!(config.backoff_base, Duration::from_millis(500));
         assert_eq!(config.backoff_cap, Duration::from_secs(30));
         assert!(config.user_agent.starts_with("rapids/"));
+        assert!(config.rate_limit_bps.is_none());
+        assert!(config.shared_limiter.is_none());
     }
 
     #[test]
@@ -121,6 +138,7 @@ mod tests {
             min_segment_bytes: 0,
             max_attempts: 0,
             gain_threshold: f64::NAN,
+            rate_limit_bps: Some(0),
             ..EngineConfig::default()
         }
         .validated()
@@ -129,5 +147,9 @@ mod tests {
         assert!(config.min_segment_bytes >= 1);
         assert!(config.max_attempts >= 1);
         assert!((config.gain_threshold - 0.20).abs() < f64::EPSILON);
+        assert!(
+            config.rate_limit_bps.is_none(),
+            "a zero ceiling means the caller wanted none"
+        );
     }
 }
