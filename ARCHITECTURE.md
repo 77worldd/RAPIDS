@@ -170,7 +170,7 @@ RAPIDS/
 | Views | `src/types.ts` + `navigation.ts` | `CoreViewId` (7 task/scheduled views) ∪ `TagId` (5 categories) |
 | UI prefs | `localStorage['rapids.ui']` | `{ v: 1, sidebarCollapsed: boolean }`, validated on read; non-secret UI state only — secrets never touch localStorage (rule 5 applies from the vault milestone onward) |
 | Icons | `assets/icon-1024.png` → `npx tauri icon` | regenerate the set whenever the mark changes |
-| Download sidecar | `<dest>.rapids/` next to the destination | `manifest.json` + `data.part` + `lock` (OS file lock, released automatically when the process dies) |
+| Download sidecar | `<dest>.rapids/` next to the destination | `manifest.json` + `data.part` + `lock` (OS file lock, released automatically when the process dies). `data.part` is preallocated to the final size when a download starts, so its length never reports progress — the manifest's `written` values do. |
 | Manifest | `<dest>.rapids/manifest.json` | `{ v, url, final_url, dest, total_bytes?, accepts_ranges, etag?, last_modified?, content_type?, filename?, expected_sha256?, observed_sha256?, created_at, segments: [{ i, start, end, written }], completed }` — written temp-file → atomic rename; `written` is a conservative flushed low-water mark |
 | Resume gate | `manifest.can_resume` + part-file check | range support recorded, stored size equals the fresh probe size, part-file length equals that size, and a stored validator (ETag preferred, else Last-Modified) matches the fresh probe — otherwise wipe and restart |
 | Engine events | `spawn_download` receiver (cap 64) | `StateChanged · Progress (coalescible) · Retrying · Completed · Failed · Cancelled`; progress carries downloaded/total/speed/ETA/connections/segment counts |
@@ -216,6 +216,11 @@ no GUI libraries; the target platform is Windows 11 anyway. The three `cargo` ga
 therefore run on the owner's machine — this split was explicitly approved. Any finding
 they produce is fixed before the session closes.
 
+Order matters for the Rust gates: `npm run build` first, because `src-tauri` embeds
+`../dist` through `generate_context!` at compile time. Then `cargo build --workspace`,
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+and `cargo test --workspace`.
+
 `scripts/content-gate.mjs` scans authored text files and fails the build on task
 markers, staged-language fillers, deferred-feature phrasing, and invented-data markers
 (it exempts itself and the generated lockfile). References to
@@ -232,7 +237,7 @@ silently and correctly when opened outside the desktop host.
 | # | Milestone | Status |
 |---|---|---|
 | M0 | Scaffold: Tauri 2 + React + TS + Tailwind shell per design | **complete** (session 1) |
-| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **complete** (session 2) — cargo gates and the DoD download run on the Windows machine |
+| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **code complete** (sessions 2–3) — compiles by audit; the independent proving run (build, fmt, clippy, tests, 100 MB kill-and-resume) on the owner's machine is the gate that marks it complete |
 | M2 | Queue + SQLite + scheduler + limiters | pending |
 | M3 | Full UI wired to engine (both list modes, add dialog, settings, fuzzy search) | pending |
 | M4 | Vault: cookies, proxy, custom headers per task | pending |
@@ -251,10 +256,10 @@ silently and correctly when opened outside the desktop host.
 - The engine and CLI are standalone; nothing in `src/` or `src-tauri/` calls
   `spawn_download` yet (fence for M1). The desktop host attaches at M2/M3.
 - `Cargo.lock` appears with the first `cargo build` on Windows and is committed then.
-- The sandbox has no Rust compiler, so the M1 Rust code is authored against stable
-  APIs without a local compile; the first Windows run is expected to apply rustfmt
-  normalization and to be the proving run for clippy/tests (any findings are fixed
-  before the milestone is called done on the user side).
+- The sandbox has no Rust compiler, so the engine is proven by an independent compile
+  run rather than a local one. Session 3 closed every finding of the first audit and
+  the further ones that reading the never-compiled code produced; the owner's run is
+  the authoritative gate, and any finding it returns is fixed in the same session.
 
 ---
 
@@ -310,3 +315,53 @@ Decisions worth knowing:
   chunk of network time and every network call has a timeout.
 - Tests throttle real sockets instead of mocking: timing behaviour (pause points,
   kill points, retries) is exercised against bytes actually in flight.
+
+### Session 3 — M1 finish: compile repair and an honest acceptance test
+Commits: `fix(engine): repair http worker and probe compile errors` →
+`fix(engine): repair coordinator borrow, control, and client plumbing` →
+`test(cli): make the kill-and-resume acceptance test observable` →
+`fix(cli): bind the cancel target as mutable` →
+`refactor(engine): scope the probe future so its borrows end early` →
+`test(cli): reuse one manifest reader runtime across the kill poll` → this document.
+
+What landed: every compile error from the independent audit is closed, plus the ones
+that only appear once the never-compiled test and CLI sources are read with the
+compiler's rules in mind. No module was split or redesigned. Frontend gates stayed
+green (`gate:content`, `lint`, `typecheck`, `build`).
+
+Fixes, by file:
+- `http/fetch.rs` — the retry jitter seed widens the segment index before rotating it
+  (`u64`, not `u32`); the `Range` header and the short-read retry message bind their
+  numbers as locals, because a format string cannot capture a field access; the worker
+  started message dropped its unused payload, which `-D warnings` would have rejected
+  as a dead field.
+- `http/probe.rs` — the HEAD outcome became one tuple write instead of two variables
+  that were always overwritten (the dead-store warning class), and the
+  `Content-Disposition` filename resolves through `?` so the option is unwrapped before
+  the name is sanitized.
+- `coordinator.rs` — the probe's HTTP client now travels through `Prepared` instead of
+  being rebuilt (one pool, one set of timeouts); the boxed probe future lives in its own
+  block so the shared borrow of `self.spec` ends before the destination branch writes to
+  it; `cancel_now` takes `Option<&mut Workspace>` and both call sites pass it, so a
+  cancel reaches the sidecar; the session control receiver is hoisted out of the pause
+  branch; every checkpoint call passes its directory; `AsyncWriteExt` is imported for the
+  part-file flush; the previous scaling window is an `Option<f64>` instead of a seeded
+  float plus a flag.
+- `crates/rapids-cli` — `rapids cancel` binds its workspace mutably (locking and
+  discarding both take a mutable receiver).
+
+Behaviour worth knowing:
+- Lifting a pause announces `Downloading` before the next session starts. The handle's
+  `resume()` waits for exactly that transition, so without it a resume would wait for an
+  event that never came even though bytes were flowing.
+- The kill-and-resume test no longer observes the part file's length: `data.part` is
+  preallocated to the final size at start, so the old check fired before the first byte
+  arrived and made the "must not refetch everything" assertion impossible. The test now
+  sums the manifest's `written` values, which is the same conservative low-water mark the
+  engine resumes from, and kills at half of the payload on that basis. Two `std::sleep`
+  calls the audit never reached were `std::thread::sleep`.
+
+Status: M1 is code complete and awaiting the proving run on the owner's machine —
+`cargo build --workspace`, `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and
+the acceptance test standalone. `Cargo.lock` is committed with that first resolution.
