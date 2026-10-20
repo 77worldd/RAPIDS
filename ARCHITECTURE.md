@@ -246,7 +246,7 @@ silently and correctly when opened outside the desktop host.
 | # | Milestone | Status |
 |---|---|---|
 | M0 | Scaffold: Tauri 2 + React + TS + Tailwind shell per design | **complete** (session 1) |
-| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **code complete** (sessions 2–3) — compiles by audit; the independent proving run (build, fmt, clippy, tests, 100 MB kill-and-resume) on the owner's machine is the gate that marks it complete |
+| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **code complete** (sessions 2–3) — build, clippy `-D warnings`, and the full suite (28/28, acceptance included) are green on the verification toolchain; the Windows battery with rustfmt and the locked dependency resolution is the remaining gate |
 | M2 | Queue + SQLite + scheduler + limiters | pending |
 | M3 | Full UI wired to engine (both list modes, add dialog, settings, fuzzy search) | pending |
 | M4 | Vault: cookies, proxy, custom headers per task | pending |
@@ -410,6 +410,32 @@ reported is repaired, with the engine's architecture unchanged.
   carries `If-Range: "v1"` into a server serving `"v2"`, which is exactly the refusal
   the test exists to check.
 
-Still pending, in order: `cargo fmt --all` normalization (the Rust side was authored
-without rustfmt, so this is the one expected red gate), the green clippy and test run,
-and the owner's Windows run. `Cargo.lock` lands with the first successful resolution.
+Still pending: `cargo fmt --all` normalization (the Rust side was authored without
+rustfmt, so this is the one expected red gate) and `Cargo.lock`, both handled by the
+owner's Windows run.
+
+### Session 3, third pass — the last two findings
+The second independent run (real toolchain, full registry) was green on build, on the
+whole test suite bar one assertion, and on the 100 MB acceptance test: 28 tests, with
+the kill-and-resume lifecycle visible end to end in 12.7 s and the final file matching
+the source hash. Two findings remained.
+
+- `filter_next` (clippy 1.99): `filename_from_url` walked the path segments with
+  `.filter(|segment| !segment.is_empty())` and then `.next_back()`. Clippy asks for
+  `.rfind()`, which is the same traversal expressed as one call, so the URL filename
+  fallback is now `parsed.path_segments()?.rfind(...)`.
+- A test contradicted the specification. `resume_requires_matching_validator_and_size`
+  expected `can_resume` to accept a fresh probe that drops a stored ETag as long as
+  Last-Modified still matched. That is not the gate: the stored ETag is the preferred
+  validator, so when the manifest holds one the fresh response must re-present it, and
+  a swapped validator means the two responses are no longer comparable — the gate wipes
+  and restarts. The implementation was already correct and is unchanged; the assertion
+  now states the rule (`assert!(!…, None, Some(<matching date>))`) with the reasoning
+  next to it. The sibling case — a stored manifest with no ETag resuming on a matching
+  Last-Modified — is the documented fallback and still asserts `true`.
+  The assertion had never executed before, which is how a spec-violating expectation
+  survived review.
+
+With these two applied the engine side is complete on the verification toolchain:
+build clean, clippy `-D warnings` clean across all three crates and all targets, 28/28
+tests. rustfmt normalization and `Cargo.lock` remain with the Windows battery.
