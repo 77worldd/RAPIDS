@@ -3,5 +3,6 @@ dist/
 coverage/
 *.local
 .DS_Store
+/target/
 src-tauri/target/
 src-tauri/gen/
