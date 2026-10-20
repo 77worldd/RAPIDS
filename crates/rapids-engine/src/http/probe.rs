@@ -281,10 +281,7 @@ pub(crate) fn filename_from_content_disposition(value: &str) -> Option<String> {
 /// Falls back to the last meaningful path segment of the URL.
 pub(crate) fn filename_from_url(url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
-    let segment = parsed
-        .path_segments()?
-        .filter(|segment| !segment.is_empty())
-        .next_back()?;
+    let segment = parsed.path_segments()?.rfind(|segment| !segment.is_empty())?;
     let decoded = percent_decode(segment);
     sanitize_filename(&decoded)
 }
