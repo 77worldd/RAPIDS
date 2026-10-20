@@ -78,8 +78,6 @@ async fn probe_once(
         content_type: None,
         filename: None,
     };
-    let mut head_saw_ranges = false;
-    let mut need_get = true;
 
     // --- HEAD: cheap metadata when the server allows it -----------------
     let head_response = match tokio::time::timeout(config.header_timeout, client.head(url).send())
@@ -100,7 +98,7 @@ async fn probe_once(
         Ok(Ok(response)) => response,
     };
     let head_status = head_response.status().as_u16();
-    match head_status {
+    let (head_saw_ranges, need_get) = match head_status {
         200..=299 => {
             result.final_url = head_response.url().to_string();
             result.total = header_u64(&head_response, &CONTENT_LENGTH);
@@ -110,14 +108,12 @@ async fn probe_once(
             if let Some(disposition) = header_str(&head_response, &CONTENT_DISPOSITION) {
                 result.filename = filename_from_content_disposition(&disposition);
             }
-            head_saw_ranges = header_accepts_bytes(&head_response, &ACCEPT_RANGES);
+            let saw_ranges = header_accepts_bytes(&head_response, &ACCEPT_RANGES);
             // Range claims get behavioural confirmation, and a missing
             // length still needs a body-less look.
-            need_get = head_saw_ranges || result.total.is_none();
+            (saw_ranges, saw_ranges || result.total.is_none())
         }
-        405 | 501 => {
-            need_get = true;
-        }
+        405 | 501 => (false, true),
         408 | 429 | 500..=599 => {
             return Err(ProbeFailure::Retry {
                 reason: format!("HEAD returned HTTP {head_status}"),
@@ -130,7 +126,7 @@ async fn probe_once(
                 url: url.to_string(),
             }))
         }
-    }
+    };
     drop(head_response);
 
     // --- GET: confirm range support, catch whatever HEAD could not ------
@@ -280,7 +276,8 @@ pub(crate) fn filename_from_content_disposition(value: &str) -> Option<String> {
             }
         }
     }
-    sanitize_filename(extended.or(plain))
+    let name = extended.or(plain)?;
+    sanitize_filename(&name)
 }
 
 /// Falls back to the last meaningful path segment of the URL.

@@ -44,9 +44,7 @@ pub(crate) fn apply_control(sender: &watch::Sender<Control>, update: impl FnOnce
 
 /// Messages workers send back to the coordinator.
 pub(crate) enum CoordMsg {
-    Started {
-        index: u32,
-    },
+    Started,
     Done {
         index: u32,
     },
@@ -171,9 +169,7 @@ pub(crate) async fn worker_loop(
 
         active.fetch_add(1, Ordering::AcqRel);
         started.fetch_add(1, Ordering::AcqRel);
-        let _ = coord.send(CoordMsg::Started {
-            index: segment.index,
-        }).await;
+        let _ = coord.send(CoordMsg::Started).await;
 
         let atomic = &progress[index];
         let result = run_with_retries(&context, segment, &control, &mut wake, atomic, &coord).await;
@@ -227,7 +223,9 @@ async fn run_with_retries(
                     return Err(EngineError::network("download segment", reason, attempt));
                 }
                 let base = super::base_backoff(&context.config, attempt);
-                let entropy = super::now_entropy() ^ segment.index.rotate_left(11);
+                // The jitter seed is 64-bit; widening the segment index keeps
+                // parallel segments from sharing one retry rhythm.
+                let entropy = super::now_entropy() ^ u64::from(segment.index).rotate_left(11);
                 let delay = super::jittered_backoff(base, entropy);
                 let _ = coord
                     .send(CoordMsg::Retrying {
@@ -295,7 +293,8 @@ async fn attempt_segment(
 
     let mut request = context.client.get(&context.final_url);
     if ranged {
-        request = request.header(RANGE, format!("bytes={start_offset}-{segment.end}"));
+        let range_end = segment.end;
+        request = request.header(RANGE, format!("bytes={start_offset}-{range_end}"));
         if let Some(etag) = &context.etag {
             request = request.header(IF_RANGE, etag.clone());
         } else if let Some(last_modified) = &context.last_modified {
@@ -452,9 +451,12 @@ async fn pump_body(
 
     match policy.target {
         Some(limit) if cursor.position >= limit => Ok(()),
-        Some(limit) => Err(AttemptFailure::Retry(format!(
-            "connection closed after {cursor.position} of {limit} bytes"
-        ))),
+        Some(limit) => {
+            let position = cursor.position;
+            Err(AttemptFailure::Retry(format!(
+                "connection closed after {position} of {limit} bytes"
+            )))
+        }
         None => Ok(()),
     }
 }
