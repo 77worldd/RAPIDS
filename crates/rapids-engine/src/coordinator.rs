@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
@@ -156,11 +157,14 @@ enum Settle {
     StartFresh,
 }
 
-/// Everything the transfer loop needs once preparation finished.
+/// Everything the transfer loop needs once preparation finished. The HTTP
+/// client built for the probe is handed over instead of built twice: one
+/// pool, one set of timeouts.
 struct Prepared {
     probe: probe::ProbeResult,
     workspace: Workspace,
     stored: Option<Manifest>,
+    client: reqwest::Client,
 }
 
 /// One tick of the coordinator's select loop.
@@ -206,7 +210,7 @@ impl Coordinator {
         self.emit(EngineEvent::Completed { path, sha256 }).await;
     }
 
-    async fn cancel_now(&self, workspace: Option<&Workspace>) {
+    async fn cancel_now(&self, workspace: Option<&mut Workspace>) {
         let result = match workspace {
             Some(workspace) => workspace.discard().await,
             None => Ok(()),
@@ -435,12 +439,16 @@ impl Coordinator {
                 changed = wake.changed() => {
                     if changed.is_err() || self.control.borrow().cancelled {
                         // Dropping `probe_fut` on return cancels the request.
-                        self.cancel_now(workspace.as_ref()).await;
+                        self.cancel_now(workspace.as_mut()).await;
                         return None;
                     }
                 }
             }
         };
+        // The probe future borrows `self.spec` and `self.config`; the box's
+        // destructor keeps those borrows alive to the end of the scope, so
+        // release it here before the destination branch mutates self.
+        drop(probe_fut);
         let probe = match probe_result {
             Ok(result) => result,
             Err(error) => {
@@ -517,6 +525,7 @@ impl Coordinator {
             probe,
             workspace,
             stored,
+            client,
         })
     }
 
@@ -530,6 +539,7 @@ impl Coordinator {
             probe,
             mut workspace,
             stored,
+            client,
         } = prepared;
         let Some(dest) = self.spec.dest.clone() else {
             self.fail(EngineError::protocol("destination was not resolved"))
@@ -620,29 +630,42 @@ impl Coordinator {
 
         self.transition(DownloadState::Downloading).await;
 
+        // One control receiver for the whole transfer phase: the session
+        // select sleeps on it, and a paused run keeps its own clone so the
+        // pause wait cannot swallow a wake meant for the session loop.
+        let mut wake = self.control_rx.clone();
+
         'run: loop {
             // --- stop flags before any work ----------------------------
             let flags = *self.control_rx.borrow();
             if flags.cancelled {
-                self.cancel_now().await;
+                self.cancel_now(Some(&mut workspace)).await;
                 return;
             }
             if flags.paused {
-                if let Err(error) = self.checkpoint(&mut manifest, &progress).await {
+                if let Err(error) =
+                    self.checkpoint(&workspace.dir, &mut manifest, &progress).await
+                {
                     self.fail(error).await;
                     return;
                 }
                 self.transition(DownloadState::Paused).await;
-                let mut wake = self.control_rx.clone();
+                let mut pause_wake = self.control_rx.clone();
                 loop {
                     let inner = *self.control_rx.borrow();
                     if !inner.paused || inner.cancelled {
                         break;
                     }
-                    if wake.changed().await.is_err() {
+                    if pause_wake.changed().await.is_err() {
                         self.fail(EngineError::protocol("control channel closed")).await;
                         return;
                     }
+                }
+                // A resume lifts the pause before a single new byte moves, so
+                // announce the state here; the handle's resume call waits for
+                // exactly this transition.
+                if !self.control_rx.borrow().cancelled {
+                    self.transition(DownloadState::Downloading).await;
                 }
                 continue 'run;
             }
@@ -678,8 +701,9 @@ impl Coordinator {
             let mut session_done = 0usize;
             let mut failure: Option<EngineError> = None;
             let mut last_window_sum: Option<u64> = None;
-            let mut last_window_bps = 0f64;
-            let mut have_window = false;
+            // `None` until the first window is measured, so the first
+            // comparison always has a real previous value.
+            let mut last_window_bps: Option<f64> = None;
             let mut settled = !scale_enabled;
             let mut last_checkpoint_bytes: u64 = 0;
 
@@ -687,7 +711,7 @@ impl Coordinator {
                 let flags = *self.control_rx.borrow();
                 if flags.cancelled {
                     join_workers(workers).await;
-                    self.cancel_now(Some(&workspace)).await;
+                    self.cancel_now(Some(&mut workspace)).await;
                     return;
                 }
                 if flags.paused {
@@ -784,9 +808,9 @@ impl Coordinator {
                             None => 0.0,
                         };
                         last_window_sum = Some(sum);
-                        if have_window {
+                        if let Some(previous_bps) = last_window_bps {
                             match scaling_decision(
-                                last_window_bps,
+                                previous_bps,
                                 current_bps,
                                 self.config.gain_threshold,
                             ) {
@@ -812,8 +836,7 @@ impl Coordinator {
                                 ScaleDecision::Settle => settled = true,
                             }
                         }
-                        last_window_bps = current_bps;
-                        have_window = true;
+                        last_window_bps = Some(current_bps);
                     }
                     IoTurn::Checkpoint => {
                         if let Err(error) =
@@ -830,7 +853,7 @@ impl Coordinator {
                             .sum();
                     }
                     IoTurn::Message(message) => match message {
-                        CoordMsg::Started { .. } => {}
+                        CoordMsg::Started => {}
                         CoordMsg::Done { .. } => {
                             session_done += 1;
                             if session_done >= incomplete.len() {
