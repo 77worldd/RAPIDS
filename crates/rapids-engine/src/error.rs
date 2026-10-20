@@ -79,6 +79,32 @@ impl EngineError {
             attempts,
         }
     }
+
+    /// Whether attempting the same download again could plausibly succeed
+    /// without the person changing anything. Hosts use this to decide
+    /// between an automatic retry with backoff and a terminal error row,
+    /// so the classification has to be honest: telling someone to wait
+    /// for a 404 that will never change is worse than failing at once.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Network { .. } | Self::Timeout { .. } => true,
+            Self::HttpStatus { status, .. } => matches!(*status, 408 | 429 | 500..=599),
+            // Another process held the workspace; it may well let go.
+            Self::WorkspaceLocked { .. } => true,
+            // Both wipe and restart from the sidecar, which is a clean
+            // outcome: the next attempt plans against the bytes the server
+            // serves now instead of splicing two versions together.
+            Self::ContentChanged | Self::SizeChanged => true,
+            // A retry cannot repair a request, a server contradicting HTTP,
+            // a full disk, an existing destination, or a hash mismatch.
+            Self::InvalidUrl { .. }
+            | Self::InvalidSpec { .. }
+            | Self::Protocol { .. }
+            | Self::DestinationExists { .. }
+            | Self::Io { .. }
+            | Self::VerificationFailed { .. } => false,
+        }
+    }
 }
 
 impl fmt::Display for EngineError {
@@ -138,3 +164,78 @@ impl fmt::Display for EngineError {
 }
 
 impl std::error::Error for EngineError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn http_status(status: u16) -> EngineError {
+        EngineError::HttpStatus {
+            status,
+            url: "https://example.com/file".to_string(),
+        }
+    }
+
+    #[test]
+    fn transient_network_failures_are_retryable() {
+        assert!(EngineError::network("server probe", "connection reset", 5).is_retryable());
+        assert!(EngineError::timeout("server probe", "no headers", 5).is_retryable());
+        assert!(EngineError::WorkspaceLocked {
+            path: PathBuf::from("file.bin.rapids")
+        }
+        .is_retryable());
+    }
+
+    #[test]
+    fn only_transient_statuses_are_retryable() {
+        for status in [408, 429, 500, 502, 503, 504, 599] {
+            assert!(http_status(status).is_retryable(), "{status} should retry");
+        }
+        for status in [400, 401, 403, 404, 410, 451, 416] {
+            assert!(
+                !http_status(status).is_retryable(),
+                "{status} must fail at once"
+            );
+        }
+    }
+
+    #[test]
+    fn a_changed_remote_file_restarts_cleanly() {
+        assert!(EngineError::ContentChanged.is_retryable());
+        assert!(EngineError::SizeChanged.is_retryable());
+    }
+
+    #[test]
+    fn unrecoverable_local_and_request_errors_are_not_retryable() {
+        assert!(
+            !EngineError::InvalidUrl {
+                url: "not a url".to_string(),
+                reason: "relative URL without a base".to_string(),
+            }
+            .is_retryable()
+        );
+        assert!(!EngineError::invalid_spec("connections must be 1-32").is_retryable());
+        assert!(!EngineError::protocol("206 without Content-Range").is_retryable());
+        assert!(
+            !EngineError::DestinationExists {
+                path: PathBuf::from("file.bin")
+            }
+            .is_retryable()
+        );
+        assert!(
+            !EngineError::io(
+                "write part file",
+                Path::new("file.bin.rapids/data.part"),
+                std::io::Error::from(std::io::ErrorKind::PermissionDenied)
+            )
+            .is_retryable()
+        );
+        assert!(
+            !EngineError::VerificationFailed {
+                expected: "a".repeat(64),
+                actual: "b".repeat(64),
+            }
+            .is_retryable()
+        );
+    }
+}
