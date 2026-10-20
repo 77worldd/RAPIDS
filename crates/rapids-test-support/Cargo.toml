@@ -1,0 +1,10 @@
+[package]
+name = "rapids-test-support"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Local HTTP server and payload generator for RAPIDS tests"
+publish = false
+
+[dependencies]
+sha2 = "0.10"

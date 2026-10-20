@@ -101,11 +101,9 @@ impl fmt::Display for EngineEvent {
                 };
                 write!(
                     f,
-                    "{} / {} · {}/s · ETA {} · {active_connections} connections · segments {segments_done}/{segments_total}",
+                    "{} / {total_text} · {}/s · ETA {eta_text} · {active_connections} connections · segments {segments_done}/{segments_total}",
                     crate::util::human_bytes(*downloaded),
-                    total_text,
                     crate::util::human_bytes(*speed_bps),
-                    eta_text,
                 )
             }
             Self::Retrying {
