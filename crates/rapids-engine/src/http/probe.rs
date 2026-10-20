@@ -284,7 +284,7 @@ pub(crate) fn filename_from_url(url: &str) -> Option<String> {
     let segment = parsed
         .path_segments()?
         .filter(|segment| !segment.is_empty())
-        .last()?;
+        .next_back()?;
     let decoded = percent_decode(segment);
     sanitize_filename(&decoded)
 }

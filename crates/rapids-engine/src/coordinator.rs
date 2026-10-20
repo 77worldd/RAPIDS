@@ -243,7 +243,7 @@ impl Coordinator {
         workspace: &Workspace,
         manifest: &Manifest,
     ) -> Result<(), EngineError> {
-        let file = tokio::fs::OpenOptions::new()
+        let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
@@ -856,7 +856,7 @@ impl Coordinator {
                     }
                     IoTurn::Message(message) => match message {
                         CoordMsg::Started => {}
-                        CoordMsg::Done { .. } => {
+                        CoordMsg::Done => {
                             session_done += 1;
                             if session_done >= incomplete.len() {
                                 apply_control(&self.control, |flags| flags.shutdown = true);
@@ -864,7 +864,7 @@ impl Coordinator {
                                 break 'io;
                             }
                         }
-                        CoordMsg::Failed { error, .. } => {
+                        CoordMsg::Failed { error } => {
                             if failure.is_none() {
                                 failure = Some(error);
                             }

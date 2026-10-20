@@ -44,8 +44,10 @@ pub(crate) fn header_accepts_bytes(response: &Response, name: &HeaderName) -> bo
 /// Exponential retry delay for `attempt` (1-based), capped by the config.
 pub(crate) fn base_backoff(config: &EngineConfig, attempt: u32) -> Duration {
     let exponent = attempt.saturating_sub(1).min(16);
-    let multiplier = 1u64 << exponent;
-    let candidate = u128::from(config.backoff_base.as_millis()) * u128::from(multiplier);
+    // Milliseconds are already u128; scaling here keeps the multiplication
+    // exact for any attempt count before the cap applies.
+    let multiplier = 1u128 << exponent;
+    let candidate = config.backoff_base.as_millis() * multiplier;
     let cap = config.backoff_cap.as_millis();
     Duration::from_millis(candidate.min(cap) as u64)
 }

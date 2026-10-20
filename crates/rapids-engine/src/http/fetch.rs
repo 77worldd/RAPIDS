@@ -45,13 +45,8 @@ pub(crate) fn apply_control(sender: &watch::Sender<Control>, update: impl FnOnce
 /// Messages workers send back to the coordinator.
 pub(crate) enum CoordMsg {
     Started,
-    Done {
-        index: u32,
-    },
-    Failed {
-        index: u32,
-        error: EngineError,
-    },
+    Done,
+    Failed { error: EngineError },
     Retrying {
         segment: u32,
         attempt: u32,
@@ -161,9 +156,7 @@ pub(crate) async fn worker_loop(
             None => false,
         };
         if already_done {
-            let _ = coord.send(CoordMsg::Done {
-                index: segment.index,
-            }).await;
+            let _ = coord.send(CoordMsg::Done).await;
             continue;
         }
 
@@ -177,17 +170,11 @@ pub(crate) async fn worker_loop(
 
         match result {
             Ok(RunOutcome::Done) => {
-                let _ = coord.send(CoordMsg::Done {
-                    index: segment.index,
-                }).await;
+                let _ = coord.send(CoordMsg::Done).await;
             }
             Ok(RunOutcome::Stopped) => return,
             Err(error) => {
-                let _ = coord.send(CoordMsg::Failed {
-                    index: segment.index,
-                    error,
-                })
-                .await;
+                let _ = coord.send(CoordMsg::Failed { error }).await;
                 return;
             }
         }
