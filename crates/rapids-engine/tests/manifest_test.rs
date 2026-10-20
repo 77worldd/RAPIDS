@@ -95,7 +95,11 @@ fn resume_requires_matching_validator_and_size() {
     let stored = sample_manifest();
 
     assert!(stored.can_resume(Some(100), Some("\"v1\""), None));
-    assert!(stored.can_resume(
+    // The stored ETag is the preferred validator: when the manifest holds one,
+    // the fresh probe must re-present it. A matching Last-Modified cannot
+    // clear the gate once the fresh response drops the ETag, because the
+    // validators are no longer comparable — the gate wipes and restarts.
+    assert!(!stored.can_resume(
         Some(100),
         None,
         Some("Wed, 21 Oct 2026 07:28:00 GMT")
