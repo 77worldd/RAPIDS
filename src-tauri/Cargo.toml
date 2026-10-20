@@ -1,0 +1,19 @@
+[package]
+name = "rapids"
+version = "0.1.0"
+description = "Fast, private, minimal download manager"
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "rapids_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3" }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.12.4" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
