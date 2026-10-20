@@ -7,10 +7,7 @@ use rapids_test_support::{expected_sha256, options, TestServer};
 /// Bytes the engine has confirmed for the stored segments. The part file is
 /// preallocated to the full size on purpose, so its length says nothing about
 /// progress; the manifest's flushed low-water marks are the honest signal.
-fn confirmed_bytes(workspace: &Workspace) -> u64 {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .expect("runtime for manifest reads");
+fn confirmed_bytes(runtime: &tokio::runtime::Runtime, workspace: &Workspace) -> u64 {
     match runtime.block_on(Manifest::load(&workspace.dir)) {
         Some(manifest) => manifest
             .segments
@@ -32,12 +29,15 @@ fn killed_download_resumes_and_hashes_identically() {
     let server = TestServer::start(server_options);
     let dir = tempfile::tempdir().expect("temp dir");
     let dest = dir.path().join("payload.bin");
-    let dest_arg = dest.to_str().expect("utf-8 destination").to_string();
+    let dest_arg = dest.to_str().expect("utf-8 destination");
     let url = server.url("/payload.bin");
     let expected = expected_sha256(total);
     let binary = env!("CARGO_BIN_EXE_rapids");
     let workspace = Workspace::for_dest(&dest);
     let part = workspace.part_path.clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime for manifest reads");
 
     // --- first run: kill around the halfway point ------------------------
     let mut first = Command::new(binary)
@@ -45,7 +45,7 @@ fn killed_download_resumes_and_hashes_identically() {
             "get",
             url.as_str(),
             "-o",
-            dest_arg.as_str(),
+            dest_arg,
             "--sha256",
             expected.as_str(),
             "--connections",
@@ -62,7 +62,7 @@ fn killed_download_resumes_and_hashes_identically() {
                  halfway point is observable"
             );
         }
-        if confirmed_bytes(&workspace) >= total / 2 {
+        if confirmed_bytes(&runtime, &workspace) >= total / 2 {
             break;
         }
         if Instant::now() >= deadline {
@@ -80,7 +80,7 @@ fn killed_download_resumes_and_hashes_identically() {
         !dest.exists(),
         "the download completed before the kill could land; lower the throttle"
     );
-    let confirmed = confirmed_bytes(&workspace);
+    let confirmed = confirmed_bytes(&runtime, &workspace);
     assert!(
         confirmed < total,
         "the kill must land before the download is complete"
@@ -93,7 +93,7 @@ fn killed_download_resumes_and_hashes_identically() {
             "get",
             url.as_str(),
             "-o",
-            dest_arg.as_str(),
+            dest_arg,
             "--sha256",
             expected.as_str(),
             "--connections",
