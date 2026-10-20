@@ -431,24 +431,26 @@ impl Coordinator {
                 return None;
             }
         };
-        let mut wake = self.control_rx.clone();
-        let mut probe_fut = Box::pin(probe::probe(&self.spec.url, &self.config, &client));
-        let probe_result = loop {
-            tokio::select! {
-                result = &mut probe_fut => break result,
-                changed = wake.changed() => {
-                    if changed.is_err() || self.control.borrow().cancelled {
-                        // Dropping `probe_fut` on return cancels the request.
-                        self.cancel_now(workspace.as_mut()).await;
-                        return None;
+        // The probe future borrows `self.spec` and `self.config`, so it lives
+        // in its own scope: those borrows end here, before the destination
+        // branch below writes to `self.spec`.
+        let probe_result = {
+            let mut wake = self.control_rx.clone();
+            let mut probe_fut = Box::pin(probe::probe(&self.spec.url, &self.config, &client));
+            loop {
+                tokio::select! {
+                    result = &mut probe_fut => break result,
+                    changed = wake.changed() => {
+                        if changed.is_err() || self.control.borrow().cancelled {
+                            // Returning here drops `probe_fut`, which cancels
+                            // the request.
+                            self.cancel_now(workspace.as_mut()).await;
+                            return None;
+                        }
                     }
                 }
             }
         };
-        // The probe future borrows `self.spec` and `self.config`; the box's
-        // destructor keeps those borrows alive to the end of the scope, so
-        // release it here before the destination branch mutates self.
-        drop(probe_fut);
         let probe = match probe_result {
             Ok(result) => result,
             Err(error) => {
