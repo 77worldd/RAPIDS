@@ -16,7 +16,12 @@ the owner explicitly opens that phase.
 | Layer | Technology | Version in repo |
 |---|---|---|
 | App shell | Tauri 2 (Rust host, WebView2) | CLI 2.12.3 / crate 2.12.4 |
-| Async runtime | tokio (`rt-multi-thread`, `macros`) | 1.x |
+| Async runtime | tokio (`rt-multi-thread`, `macros`, `fs`, `sync`, `time`, `io-util`, `signal`) | 1.x |
+| HTTP engine | reqwest (rustls + native roots, streaming, HTTP/1.1 connections) | 0.12.x |
+| Hashing | sha2 (SHA-256 verification) | 0.10.x |
+| Serialization | serde + serde_json (manifests) | 1.x |
+| CLI parsing | clap (derive) | 4.x |
+| Test server | hand-rolled `std::net` thread server (`rapids-test-support`) | in-repo |
 | Frontend | React 18 + TypeScript | 18.3.1 / 6.0.3 |
 | Styling | Tailwind CSS (Vite plugin) | 4.3.3 |
 | Motion | Framer Motion | 14.4.0 |
@@ -41,6 +46,25 @@ RAPIDS/
 ├── vite.config.ts              # react + tailwind plugins; dev server pinned to port 1420
 ├── scripts/content-gate.mjs    # mechanical enforcement of the repository content rules
 ├── assets/icon-1024.png        # original RAPIDS mark; source for `npx tauri icon`
+├── Cargo.toml                  # cargo workspace: crates/* + src-tauri (shared target/, one Cargo.lock)
+├── crates/
+│   ├── rapids-engine/          # download engine (library)
+│   │   ├── src/
+│   │   │   ├── lib.rs          # public API: spawn_download, handles, re-exports
+│   │   │   ├── config.rs       # EngineConfig with spec defaults (8→32, backoff, timeouts)
+│   │   │   ├── error.rs        # EngineError: every failure with a human message
+│   │   │   ├── events.rs       # DownloadState + EngineEvent stream contract
+│   │   │   ├── manifest.rs     # sidecar JSON: versions, atomic save, resume gate
+│   │   │   ├── workspace.rs    # dest.rapids/ dir: part file, manifest, OS file lock
+│   │   │   ├── segmenter.rs    # exact-cover byte ranges + connection scaling decision
+│   │   │   ├── hash.rs         # streamed SHA-256
+│   │   │   ├── util.rs         # human bytes/duration formatting
+│   │   │   ├── http/           # probe (ranges/validators/filenames) + fetch (workers)
+│   │   │   └── coordinator.rs  # probe → plan → sessions → finalize state machine
+│   │   └── tests/              # integration tests over the local test server
+│   ├── rapids-cli/             # `rapids get|cancel` binary (live progress, Ctrl+C)
+│   │   └── tests/kill_resume.rs# 100 MB kill-at-50% → resume → SHA-256 acceptance
+│   └── rapids-test-support/    # deterministic local HTTP server + payload generator
 ├── src/                        # frontend (React shell)
 │   ├── main.tsx                # root mount, Inter weights, StrictMode
 │   ├── App.tsx                 # StoreProvider → AppShell
@@ -102,9 +126,35 @@ RAPIDS/
 
 ### Rust host
 - **`lib.rs`** builds the Tauri app and registers commands; engine modules (scheduler,
-  segmenter, rate-limiter, protocol clients, vault) attach here with their milestones.
+  rate-limiter, protocol clients, vault) attach here with their milestones.
 - **`commands.rs`** serves `app_version` from `package_info()` — the product name and
   version have one source of truth: `tauri.conf.json`.
+
+### Engine (`crates/rapids-engine`)
+- **`coordinator.rs`** is the state machine: probe → settle/plan → transfer sessions →
+  finalize. It owns cancellation, pausing, checkpoints, progress/speed events, and the
+  connection-scaling decision; workers never make policy calls.
+- **`http/probe.rs`** discovers size, range support (header claim *and* behavioural
+  206 confirmation), ETag/Last-Modified validators, and the filename
+  (`filename*=` → `filename=` → URL segment), retrying transient statuses only.
+- **`http/fetch.rs`** runs per-segment workers over a shared queue: ranged requests
+  with `If-Range`, chunk writes before atomic progress stores, idle-read timeout,
+  exponential backoff with hash jitter, and immediate response to control flags.
+- **`manifest.rs` + `workspace.rs`** implement kill-safety: `written` values are
+  conservative flushed low-water marks, the manifest is written temp-file → rename,
+  and an OS-level file lock (auto-released when a process dies) prevents two
+  processes from sharing one workspace.
+- **`segmenter.rs`** tiles `[0,total)` into ≤32 exact-cover ranges and holds the
+  pure scaling rule (add a connection only while the last window's gain ≥ 20%).
+- **Engine is UI-agnostic**: hosts consume `spawn_download(spec, config)` →
+  `(DownloadHandle, event receiver)`; `DownloadHandle` offers `pause`, `resume`,
+  `cancel`, and a state watch.
+
+### CLI (`crates/rapids-cli`)
+- **`main.rs`** maps events to a terminal experience and exit codes
+  (0 completed, 2 paused by first Ctrl+C, 3 failure, 130 second Ctrl+C).
+- **`render.rs`** owns the single live progress line (terminal only; plain lines
+  otherwise). `cancel` removes a workspace that is not locked by a live process.
 
 ---
 
@@ -120,6 +170,11 @@ RAPIDS/
 | Views | `src/types.ts` + `navigation.ts` | `CoreViewId` (7 task/scheduled views) ∪ `TagId` (5 categories) |
 | UI prefs | `localStorage['rapids.ui']` | `{ v: 1, sidebarCollapsed: boolean }`, validated on read; non-secret UI state only — secrets never touch localStorage (rule 5 applies from the vault milestone onward) |
 | Icons | `assets/icon-1024.png` → `npx tauri icon` | regenerate the set whenever the mark changes |
+| Download sidecar | `<dest>.rapids/` next to the destination | `manifest.json` + `data.part` + `lock` (OS file lock, released automatically when the process dies) |
+| Manifest | `<dest>.rapids/manifest.json` | `{ v, url, final_url, dest, total_bytes?, accepts_ranges, etag?, last_modified?, content_type?, filename?, expected_sha256?, observed_sha256?, created_at, segments: [{ i, start, end, written }], completed }` — written temp-file → atomic rename; `written` is a conservative flushed low-water mark |
+| Resume gate | `manifest.can_resume` + part-file check | range support recorded, stored size equals the fresh probe size, part-file length equals that size, and a stored validator (ETag preferred, else Last-Modified) matches the fresh probe — otherwise wipe and restart |
+| Engine events | `spawn_download` receiver (cap 64) | `StateChanged · Progress (coalescible) · Retrying · Completed · Failed · Cancelled`; progress carries downloaded/total/speed/ETA/connections/segment counts |
+| CLI surface | `rapids get <url> [-o] [--sha256] [--connections] [--overwrite]`, `rapids cancel <path>` | exit codes: 0 completed · 2 paused by first Ctrl+C · 3 failed · 130 second Ctrl+C |
 
 ---
 
@@ -152,9 +207,9 @@ Run before every commit:
 | Types (strict, zero errors) | `npm run typecheck` | sandbox (enforced per commit) |
 | Production build | `npm run build` | sandbox (enforced per commit) |
 | Content rules | `npm run gate:content` | sandbox (enforced per commit) |
-| Rust format | `cargo fmt --all -- --check` | Windows machine (see below) |
-| Rust lints | `cargo clippy --all-targets -- -D warnings` | Windows machine (see below) |
-| Rust tests | `cargo test` | Windows machine (see below) |
+| Rust format | `cargo fmt --all` once, then `cargo fmt --all -- --check` | Windows machine (see below) |
+| Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` | Windows machine (see below) |
+| Rust tests | `cargo test --workspace` | Windows machine (see below) |
 
 The sandbox has no Rust toolchain and no route to crates.io (verified by probing), and
 no GUI libraries; the target platform is Windows 11 anyway. The three `cargo` gates
@@ -176,8 +231,8 @@ silently and correctly when opened outside the desktop host.
 
 | # | Milestone | Status |
 |---|---|---|
-| M0 | Scaffold: Tauri 2 + React + TS + Tailwind shell per design | **complete** (this session) |
-| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | pending |
+| M0 | Scaffold: Tauri 2 + React + TS + Tailwind shell per design | **complete** (session 1) |
+| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **complete** (session 2) — cargo gates and the DoD download run on the Windows machine |
 | M2 | Queue + SQLite + scheduler + limiters | pending |
 | M3 | Full UI wired to engine (both list modes, add dialog, settings, fuzzy search) | pending |
 | M4 | Vault: cookies, proxy, custom headers per task | pending |
@@ -193,7 +248,13 @@ silently and correctly when opened outside the desktop host.
   when the engine feeds live tasks. Every state reachable today is fully rendered.
 - Sidebar counts are real computations over the (genuinely empty) task list — they
   become live the moment M2/M3 deliver tasks, with no wiring changes.
+- The engine and CLI are standalone; nothing in `src/` or `src-tauri/` calls
+  `spawn_download` yet (fence for M1). The desktop host attaches at M2/M3.
 - `Cargo.lock` appears with the first `cargo build` on Windows and is committed then.
+- The sandbox has no Rust compiler, so the M1 Rust code is authored against stable
+  APIs without a local compile; the first Windows run is expected to apply rustfmt
+  normalization and to be the proving run for clippy/tests (any findings are fixed
+  before the milestone is called done on the user side).
 
 ---
 
@@ -217,3 +278,35 @@ Decisions worth knowing:
 - lucide's current icon set uses `CircleCheckBig` and `Disc3` (its `Music` mark was
   retired) — check installed exports before referencing icons.
 - Repo-wide content rules are enforced by a scanner rather than discipline alone.
+
+### Session 2 — M1 engine core
+Commits: `chore: add cargo workspace…` → `feat(engine): manifest, workspace,
+segmenter, and event core` → `feat(engine): segmented HTTP downloads…` →
+`feat(cli): rapids CLI…` → `test(cli): kill-and-resume round trip…` → this document.
+
+What landed: a cargo workspace (`crates/*` + `src-tauri`), the full engine library
+(probe, segmented fetch with retries/backoff/cancel, manifest + workspace locking,
+scaling, SHA-256 finalize), the `rapids get/cancel` CLI with live progress and
+signal handling, a deterministic in-repo HTTP test server, unit + integration
+tests, and the 100 MB kill-at-50% → resume → hash acceptance test.
+
+Decisions worth knowing:
+- Dynamic scaling is a pure function of measured windows: baseline at the start
+  count, then add one connection per 5s window only while the relative gain ≥ 20%,
+  stop permanently once it falls below; a pinned `--connections` turns scaling off.
+- Resume requires three independent proofs (range support recorded, size matches
+  the fresh probe *and* the part file's length, validator matches) — anything else
+  wipes and restarts, because splicing would be worse than re-downloading.
+- The destination name resolves after the probe (`-o` → server filename → URL
+  segment), so the workspace/lock form around the final path; explicit `-o` runs
+  settle a previously interrupted finalization before probing (works offline).
+- Pausing joins workers before the Paused state is announced and re-queues from
+  flushed progress; a resumed session starts with fresh flags and a drained
+  message channel so no stale worker message leaks across sessions.
+- Locks are operating-system file locks, not marker files: a killed process
+  releases them by itself, which is what makes the kill-and-resume test possible.
+- Control wakes use `watch` with change-only notifications; the body pump selects
+  between the next chunk and the control channel, so pause/cancel land within one
+  chunk of network time and every network call has a timeout.
+- Tests throttle real sockets instead of mocking: timing behaviour (pause points,
+  kill points, retries) is exercised against bytes actually in flight.
