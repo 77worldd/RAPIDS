@@ -1,7 +1,25 @@
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use rapids_engine::{Manifest, Workspace};
 use rapids_test_support::{expected_sha256, options, TestServer};
+
+/// Bytes the engine has confirmed for the stored segments. The part file is
+/// preallocated to the full size on purpose, so its length says nothing about
+/// progress; the manifest's flushed low-water marks are the honest signal.
+fn confirmed_bytes(workspace: &Workspace) -> u64 {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime for manifest reads");
+    match runtime.block_on(Manifest::load(&workspace.dir)) {
+        Some(manifest) => manifest
+            .segments
+            .iter()
+            .map(|segment| segment.written)
+            .sum(),
+        None => 0,
+    }
+}
 
 /// End-to-end acceptance for resume: a 100 MB download is killed at the
 /// halfway mark, restarted, and must produce the identical SHA-256 without
@@ -14,20 +32,22 @@ fn killed_download_resumes_and_hashes_identically() {
     let server = TestServer::start(server_options);
     let dir = tempfile::tempdir().expect("temp dir");
     let dest = dir.path().join("payload.bin");
+    let dest_arg = dest.to_str().expect("utf-8 destination").to_string();
+    let url = server.url("/payload.bin");
     let expected = expected_sha256(total);
     let binary = env!("CARGO_BIN_EXE_rapids");
-    let workspace = rapids_engine::Workspace::for_dest(&dest);
+    let workspace = Workspace::for_dest(&dest);
     let part = workspace.part_path.clone();
 
     // --- first run: kill around the halfway point ------------------------
     let mut first = Command::new(binary)
         .args([
             "get",
-            &server.url("/payload.bin"),
+            url.as_str(),
             "-o",
-            dest.to_str().expect("utf-8 destination"),
+            dest_arg.as_str(),
             "--sha256",
-            &expected,
+            expected.as_str(),
             "--connections",
             "8",
         ])
@@ -42,10 +62,7 @@ fn killed_download_resumes_and_hashes_identically() {
                  halfway point is observable"
             );
         }
-        let written = std::fs::metadata(&part)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        if written >= total / 2 {
+        if confirmed_bytes(&workspace) >= total / 2 {
             break;
         }
         if Instant::now() >= deadline {
@@ -53,24 +70,32 @@ fn killed_download_resumes_and_hashes_identically() {
             let _ = first.wait();
             panic!("first run never reached half of the payload");
         }
-        std::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(20));
     }
     first.kill().expect("terminate first run");
     let _ = first.wait();
 
     assert!(part.exists(), "the workspace must survive the kill");
-    assert!(!dest.exists(), "the destination file must not exist yet");
+    assert!(
+        !dest.exists(),
+        "the download completed before the kill could land; lower the throttle"
+    );
+    let confirmed = confirmed_bytes(&workspace);
+    assert!(
+        confirmed < total,
+        "the kill must land before the download is complete"
+    );
 
     // --- second run: resume from the part file ---------------------------
     server.clear_requests();
     let mut second = Command::new(binary)
         .args([
             "get",
-            &server.url("/payload.bin"),
+            url.as_str(),
             "-o",
-            dest.to_str().expect("utf-8 destination"),
+            dest_arg.as_str(),
             "--sha256",
-            &expected,
+            expected.as_str(),
             "--connections",
             "8",
         ])
@@ -87,7 +112,7 @@ fn killed_download_resumes_and_hashes_identically() {
             let _ = second.kill();
             panic!("resume run exceeded its time budget");
         }
-        std::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(50));
     }
 
     let final_bytes = std::fs::read(&dest).expect("final file");
