@@ -110,9 +110,7 @@ async fn single_stream_when_the_server_ignores_ranges() {
             active_connections, ..
         } = event
         {
-            if *active_connections > 1 {
-                exceeded_one_connection = true;
-            }
+            exceeded_one_connection |= *active_connections > 1;
         }
         matches!(event, EngineEvent::Completed { .. })
     })

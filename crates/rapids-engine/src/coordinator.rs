@@ -107,12 +107,12 @@ pub fn spawn_download(
             ));
         }
     }
-    if let Some(connections) = spec.connections {
-        if !(1..=32).contains(&connections) {
-            return Err(EngineError::invalid_spec(
-                "connections must be between 1 and 32",
-            ));
-        }
+    if let Some(connections) = spec.connections
+        && !(1..=32).contains(&connections)
+    {
+        return Err(EngineError::invalid_spec(
+            "connections must be between 1 and 32",
+        ));
     }
     if let Some(dest) = &spec.dest {
         if dest.is_dir() {

@@ -270,10 +270,8 @@ pub(crate) fn filename_from_content_disposition(value: &str) -> Option<String> {
         let raw = raw.trim().trim_matches('"');
         if key == "filename" {
             plain = Some(raw.to_string());
-        } else if key == "filename*" {
-            if let Some(encoded) = raw.strip_prefix("UTF-8''") {
-                extended = Some(percent_decode(encoded));
-            }
+        } else if key == "filename*" && let Some(encoded) = raw.strip_prefix("UTF-8''") {
+            extended = Some(percent_decode(encoded));
         }
     }
     let name = extended.or(plain)?;
