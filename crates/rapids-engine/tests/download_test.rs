@@ -318,7 +318,12 @@ async fn empty_file_downloads_to_an_empty_file() {
 async fn mid_download_validator_change_fails_the_task() {
     let total = 16 * 1024 * 1024u64;
     let mut server_options = options(total);
-    server_options.throttle_bps = Some(1024 * 1024);
+    // Every body connection drops after 256 KiB. A healthy long-lived
+    // connection would finish its segment without ever asking the server
+    // again, so the validator flip below would have nothing to intercept;
+    // the drops guarantee that a request carries If-Range after the flip.
+    server_options.flaky_every = Some(1);
+    server_options.flaky_after = 256 * 1024;
     let server = TestServer::start(server_options);
     let dir = tempfile::tempdir().expect("temp dir");
     let dest = dir.path().join("payload.bin");
@@ -328,10 +333,13 @@ async fn mid_download_validator_change_fails_the_task() {
     let (handle, mut rx) = spawn_download(spec, EngineConfig::default()).expect("spawn");
 
     wait_for(&mut rx, 30, "early progress", |event| match event {
-        EngineEvent::Progress { downloaded, .. } => *downloaded >= 1024 * 1024,
+        EngineEvent::Progress { downloaded, .. } => *downloaded >= 512 * 1024,
         _ => false,
     })
     .await;
+    // The next attempt sends If-Range: "v1"; the server now serves "v2", so
+    // the range is refused and the full body arrives instead — which is the
+    // signal the engine must refuse to splice.
     server.set_etag("\"v2\"");
 
     let failure = wait_for(&mut rx, 30, "content-changed failure", |event| {
