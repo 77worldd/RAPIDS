@@ -6,3 +6,9 @@ rust-version = "1.90"
 description = "RAPIDS segmented HTTP download engine"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3"
