@@ -156,6 +156,14 @@ RAPIDS/
 - **`render.rs`** owns the single live progress line (terminal only; plain lines
   otherwise). `cancel` removes a workspace that is not locked by a live process.
 
+### Test support (`crates/rapids-test-support`)
+- **`lib.rs`** is a thread-per-connection HTTP server on plain `std::net` serving a
+  payload generated from an index. It honours or refuses ranges, validates
+  `If-Range`, throttles per connection, drops connections early on request, and logs
+  every request with its byte count. It also counts in-flight connections and exposes
+  `wait_idle`: a killed client's last connections push their records after the kill,
+  so any byte accounting waits for the server to settle first.
+
 ---
 
 ## 4. Data formats and contracts
@@ -207,14 +215,15 @@ Run before every commit:
 | Types (strict, zero errors) | `npm run typecheck` | sandbox (enforced per commit) |
 | Production build | `npm run build` | sandbox (enforced per commit) |
 | Content rules | `npm run gate:content` | sandbox (enforced per commit) |
-| Rust format | `cargo fmt --all` once, then `cargo fmt --all -- --check` | Windows machine (see below) |
-| Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` | Windows machine (see below) |
-| Rust tests | `cargo test --workspace` | Windows machine (see below) |
+| Rust format | `cargo fmt --all` once, then `cargo fmt --all -- --check` | toolchain host (see below) |
+| Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` | toolchain host (see below) |
+| Rust tests | `cargo test --workspace` | toolchain host (see below) |
 
-The sandbox has no Rust toolchain and no route to crates.io (verified by probing), and
-no GUI libraries; the target platform is Windows 11 anyway. The three `cargo` gates
-therefore run on the owner's machine — this split was explicitly approved. Any finding
-they produce is fixed before the session closes.
+The authoring sandbox has no Rust toolchain and no route to crates.io (verified by
+probing), and no GUI libraries; the target platform is Windows 11 anyway. The three
+`cargo` gates therefore run off-sandbox: on the owner's Windows machine and in the
+independent verification environment that has rustc and registry access. Every finding
+either produces is fixed in the session that surfaced it.
 
 Order matters for the Rust gates: `npm run build` first, because `src-tauri` embeds
 `../dist` through `generate_context!` at compile time. Then `cargo build --workspace`,
@@ -256,10 +265,10 @@ silently and correctly when opened outside the desktop host.
 - The engine and CLI are standalone; nothing in `src/` or `src-tauri/` calls
   `spawn_download` yet (fence for M1). The desktop host attaches at M2/M3.
 - `Cargo.lock` appears with the first `cargo build` on Windows and is committed then.
-- The sandbox has no Rust compiler, so the engine is proven by an independent compile
-  run rather than a local one. Session 3 closed every finding of the first audit and
-  the further ones that reading the never-compiled code produced; the owner's run is
-  the authoritative gate, and any finding it returns is fixed in the same session.
+- The authoring sandbox has no Rust compiler, so the engine is proven by independent
+  compile runs. The first one showed that `rapids-test-support` had never compiled at
+  all; its findings are repaired and recorded below. M1 stays code complete until a run
+  is green, and a red run is repaired in the session that reports it.
 
 ---
 
@@ -365,3 +374,42 @@ Status: M1 is code complete and awaiting the proving run on the owner's machine 
 `cargo build --workspace`, `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and
 the acceptance test standalone. `Cargo.lock` is committed with that first resolution.
+
+### Session 3, second pass — independent verification and repairs
+Session 3's own code was compiled and run on a machine with a real toolchain and
+registry access. The engine's logic held up; the build was not green. Everything it
+reported is repaired, with the engine's architecture unchanged.
+
+- Engine: one binding had to be mutable — flushing a part file takes `&mut self` once
+  `AsyncWriteExt` is in scope.
+- `rapids-test-support` had never been compiled by anything, because every earlier
+  build stopped inside the engine library first. Nine errors, all mechanical: header
+  values captured by field access in format strings, a string literal asked for
+  `.into_bytes()`, `u64 % u32`, and a `Cow` returned where `Option<String>` was
+  declared. HEAD and a range-less GET now share one full-body response builder, so
+  that header block exists once instead of twice.
+- Clippy findings (nine): the done and failed worker messages carried a never-read
+  segment index, two module descriptions were `///` above a blank line instead of `//!`,
+  the URL filename fallback took the last segment with `filter().last()` instead of
+  `next_back()`, the backoff multiplication converted a value that was already `u128`,
+  the request target was bound and never read, and the flaky counter compared a
+  remainder to zero instead of using `is_multiple_of`.
+- Kill-and-resume accounting: the engine's resume was proven correct on that machine —
+  the second run requested only the unconfirmed remainders and the final file hashed
+  identically. The failure was in the test's accounting: the server pushes a record
+  when a connection ends, so the killed process's last eight records landed after
+  `clear_requests` and were counted against the resumed run. The server now counts
+  in-flight connections and exposes `wait_idle`; the test waits for it before clearing
+  the log. The per-connection throttle also drops to 2 MB/s, which moves the kill three
+  seconds clear of natural completion instead of sixty milliseconds.
+- Validator-change test: the premise could never happen. The server snapshots its
+  options when a connection starts and the engine keeps one long-lived connection per
+  segment, so with four segments nothing sent another request after the validator
+  flipped, and the task completed on consistent bytes — correct behaviour from the
+  engine, a test that asserted nothing. Early drops now force a post-flip retry that
+  carries `If-Range: "v1"` into a server serving `"v2"`, which is exactly the refusal
+  the test exists to check.
+
+Still pending, in order: `cargo fmt --all` normalization (the Rust side was authored
+without rustfmt, so this is the one expected red gate), the green clippy and test run,
+and the owner's Windows run. `Cargo.lock` lands with the first successful resolution.
