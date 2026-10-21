@@ -7,6 +7,8 @@ description = "RAPIDS queue, persistence, and scheduling core"
 publish = false
 
 [dependencies]
+rapids-engine = { path = "../rapids-engine" }
+serde = { version = "1", features = ["derive"] }
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
@@ -17,4 +19,5 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 
 [dev-dependencies]
+rapids-test-support = { path = "../rapids-test-support" }
 tempfile = "3"
