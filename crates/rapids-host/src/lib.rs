@@ -14,6 +14,7 @@ pub mod progress;
 mod runner;
 pub mod scheduler;
 pub mod store;
+pub mod wire;
 
 pub use api::{Host, QueueCounts, ScheduleInput, ScheduleView, Settings};
 pub use error::HostError;

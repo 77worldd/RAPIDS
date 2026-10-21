@@ -2988,6 +2988,7 @@ dependencies = [
 name = "rapids"
 version = "0.1.0"
 dependencies = [
+ "rapids-host",
  "serde",
  "serde_json",
  "tauri",
