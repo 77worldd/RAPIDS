@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rapids_engine::{DownloadHandle, DownloadSpec, EngineConfig, filename_from_url};
+use rapids_engine::{
+    ConnectionBudget, DownloadHandle, DownloadSpec, EngineConfig, RateLimiter, filename_from_url,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
@@ -33,10 +35,9 @@ use crate::store::{
 /// minute at most.
 const TICK: Duration = Duration::from_secs(1);
 
-/// The most connections one download may ask the engine for. The engine
-/// rejects anything outside 1..=32 as an invalid spec, and an invalid spec is
-/// not retryable, so a value above this would fail a task on its first
-/// attempt. Anything derived from a global budget is clamped to it here.
+/// The most workers one download may ask the engine for. It rejects a
+/// per-task plan outside 1..=32, so stored plans are clamped here. The
+/// separate app-wide budget governs active HTTP requests across all tasks.
 pub const MAX_CONNECTIONS_PER_TASK: u8 = 32;
 
 /// Everything a caller must supply to enqueue work.
@@ -248,6 +249,9 @@ struct Manager {
     /// True when the queue is paused: running downloads continue, nothing new
     /// starts.
     paused: bool,
+    /// One pair of live limits for every download this manager starts.
+    global_limiter: Arc<RateLimiter>,
+    connections: Arc<ConnectionBudget>,
     running: HashMap<i64, DownloadHandle>,
     reports: mpsc::Sender<Report>,
     report_rx: mpsc::Receiver<Report>,
@@ -278,6 +282,8 @@ pub fn spawn(
         started: Instant::now(),
         progress: ProgressBuffer::new(),
         paused: false,
+        global_limiter: Arc::new(RateLimiter::new(None)),
+        connections: Arc::new(ConnectionBudget::new(48)),
         running: HashMap::new(),
         reports: report_tx,
         report_rx,
@@ -335,6 +341,34 @@ impl Manager {
         self.pump().await
     }
 
+    /// Loads the two app-wide limits before admitting work, and updates the
+    /// same shared objects already held by running engines on every refresh.
+    async fn sync_limits(&self) -> Result<(), HostError> {
+        let pool = self.store.pool();
+        let total = settings::get_i64(pool, settings::MAX_CONNECTIONS_TOTAL, 48).await?;
+        if !(1..=128).contains(&total) {
+            return Err(HostError::invalid(
+                "max_connections_total must be between 1 and 128",
+            ));
+        }
+        let total = usize::try_from(total)
+            .map_err(|_| HostError::invalid("max_connections_total is out of range"))?;
+        let rate = match settings::get_optional_i64(pool, settings::GLOBAL_SPEED_LIMIT).await? {
+            None => None,
+            Some(value) => Some(
+                u64::try_from(value)
+                    .ok()
+                    .filter(|rate| (1_024..=1_073_741_824).contains(rate))
+                    .ok_or_else(|| {
+                        HostError::invalid("global_speed_limit must be between 1024 and 1073741824")
+                    })?,
+            ),
+        };
+        self.connections.set_limit(total);
+        self.global_limiter.set_rate(rate);
+        Ok(())
+    }
+
     /// Starts due work while there is room.
     ///
     /// A queued row can still be waiting for two reasons, and both are
@@ -342,6 +376,7 @@ impl Manager {
     /// and its window may not be open. Scheduled rows are never picked up —
     /// the tick moves them into the queue when their window opens.
     async fn pump(&mut self) -> Result<(), HostError> {
+        self.sync_limits().await?;
         if self.paused {
             return Ok(());
         }
@@ -349,7 +384,11 @@ impl Manager {
             .await
             .unwrap_or(3)
             .clamp(1, 32);
-        let max_parallel = usize::try_from(max_parallel).unwrap_or(3);
+        // Each running task needs at least one usable slot. The engine's
+        // shared budget governs actual HTTP attempts within those tasks.
+        let max_parallel = usize::try_from(max_parallel)
+            .unwrap_or(3)
+            .min(self.connections.limit());
         let schedules = schedules::list(self.store.pool())
             .await
             .unwrap_or_default();
@@ -475,6 +514,8 @@ impl Manager {
             rate_limit_bps: row
                 .speed_limit_bps
                 .and_then(|value| u64::try_from(value).ok()),
+            shared_limiter: Some(Arc::clone(&self.global_limiter)),
+            connection_budget: Some(Arc::clone(&self.connections)),
             ..EngineConfig::default()
         };
 

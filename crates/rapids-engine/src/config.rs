@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::connections::ConnectionBudget;
 use crate::error::EngineError;
 use crate::rate::RateLimiter;
 
@@ -11,7 +12,8 @@ use crate::rate::RateLimiter;
 /// least 20%, and give every network operation a bounded, retried lifetime.
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
-    /// Connections opened when a segmented download starts.
+    /// Workers started when a segmented download begins. A shared budget
+    /// may admit fewer simultaneous HTTP requests than active workers.
     pub start_connections: u8,
     /// Hard ceiling for dynamic connection scaling.
     pub max_connections: u8,
@@ -47,6 +49,10 @@ pub struct EngineConfig {
     /// Ceiling shared by every running download, supplied by the host so a
     /// changed global limit reaches downloads that are already running.
     pub shared_limiter: Option<Arc<RateLimiter>>,
+    /// App-wide budget for active HTTP requests. A changing limit also
+    /// applies to downloads already running, without altering their per-task
+    /// connection plans.
+    pub connection_budget: Option<Arc<ConnectionBudget>>,
 }
 
 impl Default for EngineConfig {
@@ -69,6 +75,7 @@ impl Default for EngineConfig {
             user_agent: format!("rapids/{}", env!("CARGO_PKG_VERSION")),
             rate_limit_bps: None,
             shared_limiter: None,
+            connection_budget: None,
         }
     }
 }
@@ -119,6 +126,7 @@ mod tests {
         assert!(config.user_agent.starts_with("rapids/"));
         assert!(config.rate_limit_bps.is_none());
         assert!(config.shared_limiter.is_none());
+        assert!(config.connection_budget.is_none());
     }
 
     #[test]

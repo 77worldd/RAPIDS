@@ -27,8 +27,8 @@ pub struct DownloadSpec {
     /// server-provided filename first, then the URL's last segment.
     pub dest: Option<PathBuf>,
     pub expected_sha256: Option<String>,
-    /// Pins the connection count (scaling off); `None` runs the default
-    /// 8 → 32 dynamic behaviour.
+    /// Pins this task's worker plan (scaling off); `None` runs the default
+    /// 8 → 32 dynamic behaviour. A shared budget may allow fewer requests.
     pub connections: Option<u8>,
     pub overwrite: bool,
 }
@@ -488,7 +488,8 @@ impl Coordinator {
         };
         // The probe future borrows `self.spec` and `self.config`, so it lives
         // in its own scope: those borrows end here, before the destination
-        // branch below writes to `self.spec`.
+        // branch below writes to `self.spec`. A stop also drops a probe that
+        // is waiting for a connection budget lease.
         let probe_result = {
             let mut wake = self.control_rx.clone();
             let mut probe_fut = Box::pin(probe::probe(&self.spec.url, &self.config, &client));

@@ -9,14 +9,19 @@ use reqwest::header::HeaderName;
 use crate::config::EngineConfig;
 use crate::error::EngineError;
 
-/// Builds the shared HTTP client: rustls with the platform's trust store,
-/// HTTP/1.1 connections only (segment ranges map 1:1 onto connections), no
-/// content-encoding features (range bytes must arrive raw), and a connect
-/// timeout. Per-request timeouts live at the call sites.
+/// Builds the shared HTTP client with the platform's trust store and a
+/// connect timeout. When an app-wide connection budget is in use, requests
+/// use HTTP/1 and leave no idle sockets in the pool: each held lease then
+/// covers one actual connection, including its response body. Per-request
+/// timeouts live at the call sites.
 pub(crate) fn build_client(config: &EngineConfig) -> Result<reqwest::Client, EngineError> {
-    reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .user_agent(config.user_agent.clone())
-        .connect_timeout(config.connect_timeout)
+        .connect_timeout(config.connect_timeout);
+    if config.connection_budget.is_some() {
+        builder = builder.http1_only().pool_max_idle_per_host(0);
+    }
+    builder
         .build()
         .map_err(|error| EngineError::network("build HTTP client", error.to_string(), 0))
 }

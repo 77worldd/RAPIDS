@@ -167,13 +167,12 @@ pub(crate) async fn worker_loop(
             continue;
         }
 
-        active.fetch_add(1, Ordering::AcqRel);
         started.fetch_add(1, Ordering::AcqRel);
         let _ = coord.send(CoordMsg::Started).await;
 
         let atomic = &progress[index];
-        let result = run_with_retries(&context, segment, &control, &mut wake, atomic, &coord).await;
-        active.fetch_sub(1, Ordering::AcqRel);
+        let result = run_with_retries(&context, segment, &control, &mut wake, atomic, &coord, &active)
+            .await;
 
         match result {
             Ok(RunOutcome::Done) => {
@@ -195,14 +194,33 @@ async fn run_with_retries(
     wake: &mut watch::Receiver<Control>,
     progress: &AtomicU64,
     coord: &mpsc::Sender<CoordMsg>,
+    active: &AtomicUsize,
 ) -> Result<RunOutcome, EngineError> {
     let mut attempt = 0u32;
     loop {
         if control.borrow().stop_requested() {
             return Ok(RunOutcome::Stopped);
         }
+        // One lease covers the entire response, including any wait for
+        // bandwidth tokens. Return it before reporting a retry or sleeping
+        // through backoff; no parked worker holds a network connection.
+        let lease = if let Some(budget) = &context.config.connection_budget {
+            match budget.acquire_while(|| !control.borrow().stop_requested()).await {
+                Some(lease) => Some(lease),
+                None => return Ok(RunOutcome::Stopped),
+            }
+        } else {
+            None
+        };
+        if control.borrow().stop_requested() {
+            return Ok(RunOutcome::Stopped);
+        }
         attempt += 1;
-        match attempt_segment(context, segment, control, wake, progress).await {
+        active.fetch_add(1, Ordering::AcqRel);
+        let result = attempt_segment(context, segment, control, wake, progress).await;
+        active.fetch_sub(1, Ordering::AcqRel);
+        drop(lease);
+        match result {
             Ok(()) => return Ok(RunOutcome::Done),
             Err(AttemptFailure::Stop) => {
                 if control.borrow().stop_requested() {
