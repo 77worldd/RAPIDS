@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rapids_engine::{
-    DownloadSpec, EngineConfig, EngineEvent, RateLimiter, sha256_file, spawn_download,
+    DownloadSpec, EngineConfig, EngineEvent, RateLimiter, RateLimits, sha256_file, spawn_download,
 };
 use rapids_test_support::{TestServer, expected_sha256, options};
 
@@ -98,6 +98,30 @@ async fn a_global_limit_binds_a_download_with_no_limit_of_its_own() {
     // A live change takes effect without restarting anything.
     global.set_rate(Some(8 * 1024 * 1024));
     assert_eq!(global.rate_bps(), Some(8 * 1024 * 1024));
+}
+
+#[tokio::test(start_paused = true)]
+async fn two_downloads_debit_one_shared_global_bucket() {
+    // A 64 KiB/s bucket holds a 16 KiB burst. Two independently composed
+    // downloads cannot both spend that burst at the same instant.
+    let global = Arc::new(RateLimiter::new(Some(64 * 1024)));
+    let first = RateLimits::compose(Some(Arc::clone(&global)), None);
+    let second = RateLimits::compose(Some(Arc::clone(&global)), None);
+    let started = tokio::time::Instant::now();
+    let (one, two) = tokio::join!(
+        first.acquire_while(16 * 1024, || true),
+        second.acquire_while(16 * 1024, || true)
+    );
+    assert!(one && two);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(250),
+        "both downloads spent the same global burst in {elapsed:?}"
+    );
+    assert!(
+        elapsed <= Duration::from_millis(500),
+        "a 16 KiB refill at 64 KiB/s took {elapsed:?} of paused clock time"
+    );
 }
 
 #[tokio::test]

@@ -6,11 +6,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rapids_host::events::{EventSink, RecordingSink};
+use rapids_host::scheduler::{DAY_MS, MINUTE_MS, window_state};
 use rapids_host::store::{
-    NewSchedule, NewTask, ScheduleKind, Store, TaskCategory, TaskRow, TaskStatus, history,
-    schedules, settings, tasks,
+    NewSchedule, NewTask, ScheduleKind, ScheduleRow, Store, TaskCategory, TaskRow, TaskStatus,
+    history, schedules, settings, tasks,
 };
-use rapids_host::{AddRequest, Clock, ManagerHandle, now_ms};
+use rapids_host::{AddRequest, Clock, ManagerHandle, Window, now_ms};
 use rapids_test_support::{TestServer, expected_sha256, options};
 use tokio::task::JoinHandle;
 
@@ -130,6 +131,36 @@ impl Harness {
         self.manager.shutdown().await;
         let _ = self.join.await;
     }
+
+    /// End the first manager and pool before reading the same database with
+    /// a new manager. The temporary directory stays alive across the gap.
+    async fn stop_and_reopen(self) -> Pending {
+        let Self {
+            store,
+            manager,
+            sink: _,
+            join,
+            downloads,
+            _dir,
+        } = self;
+        manager.shutdown().await;
+        join.await.expect("manager stopped");
+        drop(manager);
+        Arc::try_unwrap(store)
+            .unwrap_or_else(|_| panic!("the old manager still holds the store"))
+            .close()
+            .await;
+        let store = Arc::new(
+            Store::open(&_dir.path().join("rapids.db"))
+                .await
+                .expect("reopen store"),
+        );
+        Pending {
+            store,
+            downloads,
+            _dir,
+        }
+    }
 }
 
 #[tokio::test]
@@ -167,6 +198,7 @@ async fn a_retryable_failure_waits_its_backoff_and_tries_again() {
         })
         .await;
     let due = waiting.next_attempt_at.expect("a retry is scheduled");
+    assert_eq!(due - waiting.updated_at, 800, "first wait is the base delay");
     let now = now_ms();
     assert!(
         due > now,
@@ -185,10 +217,18 @@ async fn a_retryable_failure_waits_its_backoff_and_tries_again() {
         waiting.error_message
     );
 
-    // Nobody asked for this: the second attempt happens on its own.
-    harness
-        .wait_for(view.id, "second attempt", |row| row.attempts >= 2)
+    // Nobody asked for this: the second attempt happens on its own, and
+    // its wait doubles rather than repeating the first delay.
+    let second = harness
+        .wait_for(view.id, "second retry", |row| {
+            row.attempts == 2 && row.status_enum() == Some(TaskStatus::Queued)
+        })
         .await;
+    assert_eq!(
+        second.next_attempt_at.expect("second retry is scheduled") - second.updated_at,
+        1_600,
+        "the second backoff is twice the first"
+    );
 
     // The budget runs out at three attempts.
     let failed = harness
@@ -297,6 +337,84 @@ async fn a_queued_row_does_not_start_before_it_is_due() {
     );
 
     harness.finish().await;
+}
+
+#[tokio::test]
+async fn a_real_retry_keeps_its_due_time_and_attempt_count_across_restart() {
+    let total = 64 * 1024u64;
+    let server = TestServer::start(options(total));
+    let harness = Harness::start().await;
+    harness.set(settings::RETRY_MAX_ATTEMPTS, "3").await;
+    harness.set(settings::RETRY_BASE_MS, "2000").await;
+
+    let workspace = harness.downloads.join("payload.bin.rapids");
+    std::fs::create_dir_all(&workspace).expect("workspace");
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(workspace.join("lock"))
+        .expect("lock file");
+    held.try_lock().expect("hold the workspace");
+
+    let view = harness
+        .manager
+        .add(harness.request(&server.url("/payload.bin")))
+        .await
+        .expect("add");
+    let waiting = harness
+        .wait_for(view.id, "retry waiting", |row| {
+            row.attempts == 1 && row.status_enum() == Some(TaskStatus::Queued)
+        })
+        .await;
+    let due = waiting.next_attempt_at.expect("next attempt is scheduled");
+    assert_eq!(due - waiting.updated_at, 2_000);
+
+    let pending = harness.stop_and_reopen().await;
+    let restored = tasks::get(pending.store.pool(), view.id)
+        .await
+        .expect("read task")
+        .expect("retry survived the restart");
+    assert_eq!(restored.status_enum(), Some(TaskStatus::Queued));
+    assert_eq!(restored.attempts, 1);
+    assert_eq!(restored.next_attempt_at, Some(due));
+    assert_eq!(restored.error_message, waiting.error_message);
+    assert!(
+        tasks::due(pending.store.pool(), due - 1)
+            .await
+            .expect("not yet due")
+            .is_empty(),
+        "a persisted retry cannot run even one millisecond early"
+    );
+    let due_ids: Vec<_> = tasks::due(pending.store.pool(), due)
+        .await
+        .expect("due work")
+        .iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(due_ids, vec![view.id]);
+
+    drop(held);
+    let resumed = pending.start();
+    let completed = resumed
+        .wait_for(view.id, "completion after restart", |row| {
+            row.status_enum() == Some(TaskStatus::Completed)
+        })
+        .await;
+    assert_eq!(completed.attempts, 1);
+    assert_eq!(completed.next_attempt_at, None);
+    assert_eq!(
+        completed.observed_sha256.as_deref(),
+        Some(expected_sha256(total).as_str())
+    );
+    resumed.manager.list().await.expect("manager caught up");
+    let entries = history::recent(resumed.store.pool(), 10)
+        .await
+        .expect("history");
+    assert_eq!(entries.len(), 1, "the failed attempt was not an outcome");
+    assert_eq!(entries[0].outcome, "completed");
+
+    resumed.finish().await;
 }
 
 #[tokio::test]
@@ -415,4 +533,30 @@ async fn a_closed_window_takes_its_queued_work_back_out() {
     assert!(harness.destination("payload.bin").exists());
 
     harness.finish().await;
+}
+
+#[test]
+fn a_weekly_start_window_crosses_midnight_without_opening_on_tuesday() {
+    // Monday 1970-01-05 at 23:30 UTC, with Monday as the only selected day.
+    let monday = 4 * DAY_MS;
+    let start = monday + 23 * 60 * MINUTE_MS + 30 * MINUTE_MS;
+    let schedule = ScheduleRow {
+        id: 1,
+        label: "late Monday".to_string(),
+        kind: ScheduleKind::Weekly.as_str().to_string(),
+        start_at: start,
+        window_minutes: 120,
+        weekdays: 1,
+        enabled: 1,
+        created_at: start,
+    };
+    let at = |elapsed: i64| window_state(&schedule, start + elapsed, Clock::utc());
+
+    assert_eq!(at(-1), Window::Later);
+    assert_eq!(at(0), Window::Open);
+    assert_eq!(at(60 * MINUTE_MS), Window::Open);
+    assert_eq!(at(120 * MINUTE_MS - 1), Window::Open);
+    assert_eq!(at(120 * MINUTE_MS), Window::Later);
+    assert_eq!(at(DAY_MS), Window::Later, "Tuesday is not selected");
+    assert_eq!(at(7 * DAY_MS), Window::Open, "the next Monday opens");
 }
