@@ -1,3 +1,4 @@
+import { QueueToggle } from "./QueueToggle";
 import { RefreshButton } from "./RefreshButton";
 import { SearchBox } from "./SearchBox";
 import { ViewTitle } from "./ViewTitle";
@@ -8,6 +9,7 @@ export function TopBar() {
       <ViewTitle />
       <SearchBox />
       <div className="ml-auto flex items-center gap-1.5">
+        <QueueToggle />
         <RefreshButton />
       </div>
     </header>
