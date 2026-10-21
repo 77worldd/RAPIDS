@@ -1,278 +1,183 @@
 # RAPIDS — Architecture
 
-RAPIDS is a fast, private, minimal download manager for Windows 11, built for personal
-use. This document is the authoritative map of the codebase and is updated at the end of
-every session.
+RAPIDS is a Windows desktop HTTP(S) download manager. This is the implemented
+architecture at M2's fenced tip, `2433b6444198d8353a43dfa96d9ae14cb56aca7b`.
+The session log below preserves earlier snapshots; the current map and milestone
+status in this document supersede their historical pending notes.
 
-**Scope until opened otherwise:** HTTP/HTTPS segmented downloads, queue/scheduler,
-organization, encrypted vault, system integration, browser extension, FTP.
-**Closed phase:** BitTorrent, HLS/M3U8, and media-site parsing remain out of scope until
-the owner explicitly opens that phase.
-
----
+**Implemented scope:** persisted download tasks, an ordered queue, timed start
+windows, retry/backoff, rate and connection limits, and a desktop task view.
+BitTorrent, HLS/M3U8, and media-site parsing are outside the implemented scope.
 
 ## 1. Stack
 
-| Layer | Technology | Version in repo |
-|---|---|---|
-| App shell | Tauri 2 (Rust host, WebView2) | CLI 2.12.3 / crate 2.12.4 |
-| Async runtime | tokio (`rt-multi-thread`, `macros`, `fs`, `sync`, `time`, `io-util`, `signal`) | 1.x |
-| HTTP engine | reqwest (rustls + native roots, streaming, HTTP/1.1 connections) | 0.12.x |
-| Hashing | sha2 (SHA-256 verification) | 0.10.x |
-| Serialization | serde + serde_json (manifests) | 1.x |
-| CLI parsing | clap (derive) | 4.x |
-| Test server | hand-rolled `std::net` thread server (`rapids-test-support`) | in-repo |
-| Frontend | React 18 + TypeScript | 18.3.1 / 6.0.3 |
-| Styling | Tailwind CSS (Vite plugin) | 4.3.3 |
-| Motion | Framer Motion | 14.4.0 |
-| Icons | lucide-react | 1.60.0 |
-| Fonts | Inter, self-hosted via `@fontsource/inter` (zero network requests) | 5.3.0 |
-| Bundler | Vite | 8.3.4 |
-| Lint/format | ESLint (flat, type-aware) + typescript-eslint + Prettier | 10.13.0 / 8.72.0 |
-| Storage (M2 onward) | SQLite via sqlx + sidecar JSON manifests | not yet attached |
+| Layer | Implemented technology |
+| --- | --- |
+| Desktop shell | Tauri 2; Rust commands and targeted events |
+| Interface | React 18, TypeScript, Vite, Tailwind CSS 4, Framer Motion, lucide-react |
+| Transfer core | Rust, Tokio, reqwest with rustls, SHA-256 |
+| Persistent host | SQLite via sqlx 0.8, versioned SQL migration |
+| Interchange | Serde JSON for IPC, settings values, and sidecar manifests |
+| CLI | clap-based `rapids` binary for headless transfers |
 
-Dependency policy: every entry above was approved before install (rule 9). No other
-runtime dependencies exist.
+The Cargo workspace contains `rapids-engine`, `rapids-host`, `rapids-cli`,
+`rapids-test-support`, and the `src-tauri` app. The web interface is a
+Vite/React application at the repository root.
 
----
+## 2. Repository map
 
-## 2. Repository layout
-
-```
+```text
 RAPIDS/
-├── package.json                # scripts: dev, build, typecheck, lint, format, gate:content, tauri
-├── eslint.config.js            # flat config; type-aware rules for TS; no-console = error in app code
-├── tsconfig.json               # single strict project: src/ + vite.config.ts
-├── vite.config.ts              # react + tailwind plugins; dev server pinned to port 1420
-├── scripts/content-gate.mjs    # mechanical enforcement of the repository content rules
-├── assets/icon-1024.png        # original RAPIDS mark; source for `npx tauri icon`
-├── Cargo.toml                  # cargo workspace: crates/* + src-tauri (shared target/, one Cargo.lock)
+├── Cargo.toml / Cargo.lock       Rust workspace and locked dependencies
+├── package.json / package-lock.json
 ├── crates/
-│   ├── rapids-engine/          # download engine (library)
-│   │   ├── src/
-│   │   │   ├── lib.rs          # public API: spawn_download, handles, re-exports
-│   │   │   ├── config.rs       # EngineConfig with spec defaults (8→32, backoff, timeouts)
-│   │   │   ├── error.rs        # EngineError: every failure with a human message
-│   │   │   ├── events.rs       # DownloadState + EngineEvent stream contract
-│   │   │   ├── manifest.rs     # sidecar JSON: versions, atomic save, resume gate
-│   │   │   ├── workspace.rs    # dest.rapids/ dir: part file, manifest, OS file lock
-│   │   │   ├── segmenter.rs    # exact-cover byte ranges + connection scaling decision
-│   │   │   ├── hash.rs         # streamed SHA-256
-│   │   │   ├── util.rs         # human bytes/duration formatting
-│   │   │   ├── http/           # probe (ranges/validators/filenames) + fetch (workers)
-│   │   │   └── coordinator.rs  # probe → plan → sessions → finalize state machine
-│   │   └── tests/              # integration tests over the local test server
-│   ├── rapids-cli/             # `rapids get|cancel` binary (live progress, Ctrl+C)
-│   │   └── tests/kill_resume.rs# 100 MB kill-at-50% → resume → SHA-256 acceptance
-│   └── rapids-test-support/    # deterministic local HTTP server + payload generator
-├── src/                        # frontend (React shell)
-│   ├── main.tsx                # root mount, Inter weights, StrictMode
-│   ├── App.tsx                 # StoreProvider → AppShell
-│   ├── index.css               # Tailwind entry, theme tokens, base typography, scrollbars
-│   ├── types.ts                # shared contracts: ViewId, TagId, Task, TaskStatus, AppInfo
-│   ├── config/
-│   │   ├── navigation.ts       # sidebar sections/items (labels + icons) and viewLabel()
-│   │   └── categories.ts       # default categories: Apps, Movies, Music, Images, Other
-│   ├── state/
-│   │   ├── StoreProvider.tsx   # context + reducer, hydration seam, persistence of UI prefs
-│   │   └── selectors.ts        # per-view filtering, visible-list filtering, counts
-│   ├── lib/
-│   │   ├── ipc.ts              # the single typed invoke() wrapper
-│   │   ├── uiPrefs.ts          # versioned localStorage for sidebar state (non-secret only)
-│   │   └── cn.ts               # className joiner (no dependency)
-│   ├── components/
-│   │   ├── layout/AppShell.tsx # sidebar | (topbar / content) grid, page-level overflow lock
-│   │   ├── sidebar/            # Sidebar, SidebarSection, SidebarItem, CountBadge, toggle, footer
-│   │   ├── topbar/             # TopBar, ViewTitle, SearchBox, RefreshButton
-│   │   ├── ui/                 # Button, IconButton, EmptyState, Skeleton
-│   │   └── motion/variants.ts  # the single motion constant: 180ms ease-out
-│   └── views/TasksView.tsx     # loading skeleton / empty / no-match states
-└── src-tauri/                  # Rust host
-    ├── Cargo.toml              # rapids 0.1.0; tauri, serde, serde_json, tokio
-    ├── tauri.conf.json         # identity, window, CSP, icons
-    ├── capabilities/default.json # least privilege: core:default for the main window
-    ├── icons/                  # full icon set generated from assets/icon-1024.png
-    └── src/
-        ├── main.rs             # Windows subsystem entry → rapids_lib::run()
-        ├── lib.rs              # builder + command registration
-        └── commands.rs         # app_version → { name, version } from the host bundle
+│   ├── rapids-engine/
+│   │   ├── src/{config,connections,coordinator,error,events,hash,lib,
+│   │   │         manifest,rate,segmenter,util,workspace}.rs
+│   │   ├── src/http/{fetch,mod,probe}.rs
+│   │   └── tests/{connections_test,download_test,manifest_test,
+│   │             rate_test,segmenter_test}.rs
+│   ├── rapids-host/
+│   │   ├── migrations/0001_init.sql
+│   │   ├── src/{api,error,events,lib,manager,progress,runner,scheduler,wire}.rs
+│   │   ├── src/store/{db,history,mod,schedules,settings,tasks}.rs
+│   │   └── tests/{api_test,manager_test,scheduler_test,store_test}.rs
+│   ├── rapids-cli/src/{cli,main,render}.rs
+│   ├── rapids-cli/tests/kill_resume.rs
+│   └── rapids-test-support/src/lib.rs
+├── src-tauri/src/{adapter,commands,lib,main,platform}.rs
+├── src/
+│   ├── {App,main}.tsx / types.ts / index.css
+│   ├── components/{layout,motion,sidebar,tasks,topbar,ui}/
+│   ├── config/{categories,navigation}.ts
+│   ├── lib/{addDraft,cn,format,ipc,uiPrefs}.ts
+│   ├── state/StoreProvider.tsx / selectors.ts
+│   └── views/TasksView.tsx
+├── scripts/content-gate.mjs
+└── tests/add-draft.test.mjs
 ```
 
----
+`rapids-engine` and `rapids-host` are headless: no webview or Tauri type
+crosses into them. The Tauri crate supplies platform paths, runs the host,
+exposes commands, and forwards host events. The CLI and test-support crate
+exercise the same engine independently of the desktop shell.
 
 ## 3. Module responsibilities
 
-### Frontend shell
-- **`AppShell`** owns layout geometry only: fixed sidebar, slim top bar, scroll-locked
-  content column. No data.
-- **`StoreProvider`** is the single state container (React context + reducer — no state
-  library). It owns the hydration state machine (`loading → ready`), the current view,
-  the search query, the task list, and sidebar collapse. Every future engine event
-  enters the app by dispatching here.
-- **`selectors.ts`** is the only place that knows view semantics (Running =
-  status `downloading`, Unfinished = anything but `completed`, tag views match
-  `task.category`, etc.). Both sidebar counts and the content list derive from it, so
-  badges and titles can never disagree.
-- **`Sidebar`** renders NAV_SECTIONS with live counts and an animated active marker;
-  **`TopBar`** renders view title + count, search, refresh. `SearchBox` filters through
-  the store; Escape and the clear button empty the query.
-- **`TasksView`** maps hydration state to the three user-visible states: skeleton while
-  counting, one-sentence empty state per view, or a no-match state with a working
-  "Clear search" action.
-- **`lib/ipc.ts`** is the only module that touches the host bridge. All future commands
-  get a typed wrapper here — components never call `invoke` directly.
-- **`motion/variants.ts`** holds the app's one motion constant (180ms ease-out). CSS
-  hover/focus transitions are `duration-150 ease-out`. Nothing animates longer.
+### Transfer core — `crates/rapids-engine`
 
-### Rust host
-- **`lib.rs`** builds the Tauri app and registers commands; engine modules (scheduler,
-  rate-limiter, protocol clients, vault) attach here with their milestones.
-- **`commands.rs`** serves `app_version` from `package_info()` — the product name and
-  version have one source of truth: `tauri.conf.json`.
+- `http/probe` identifies size, byte-range support, validators, and HTTP
+  metadata; `config` validates transfer parameters and timeouts.
+- `coordinator` chooses a fresh or resumable run, drives `segmenter` and
+  `http/fetch`, handles retry/stop and checkpoints progress. `manifest` owns
+  the resume record and its reuse gate; `workspace` owns the sidecar and OS
+  lock; `hash` checks the result. `events` defines the engine event contract.
+- `connections` holds an app-wide lease budget around active HTTP attempts,
+  including probes; parked workers and backoff do not hold a lease. `rate`
+  shares an app-wide byte budget and combines it with per-task ceilings.
+- The coordinator verifies completed bytes before publishing the final file
+  by rename; in-flight bytes remain in `data.part`. The engine reports whether
+  a failure is retryable and preserves the original error message.
 
-### Engine (`crates/rapids-engine`)
-- **`coordinator.rs`** is the state machine: probe → settle/plan → transfer sessions →
-  finalize. It owns cancellation, pausing, checkpoints, progress/speed events, and the
-  connection-scaling decision; workers never make policy calls.
-- **`http/probe.rs`** discovers size, range support (header claim *and* behavioural
-  206 confirmation), ETag/Last-Modified validators, and the filename
-  (`filename*=` → `filename=` → URL segment), retrying transient statuses only.
-- **`http/fetch.rs`** runs per-segment workers over a shared queue: ranged requests
-  with `If-Range`, chunk writes before atomic progress stores, idle-read timeout,
-  exponential backoff with hash jitter, and immediate response to control flags.
-- **`manifest.rs` + `workspace.rs`** implement kill-safety: `written` values are
-  conservative flushed low-water marks, the manifest is written temp-file → rename,
-  and an OS-level file lock (auto-released when a process dies) prevents two
-  processes from sharing one workspace.
-- **`segmenter.rs`** tiles `[0,total)` into ≤32 exact-cover ranges and holds the
-  pure scaling rule (add a connection only while the last window's gain ≥ 20%).
-- **Engine is UI-agnostic**: hosts consume `spawn_download(spec, config)` →
-  `(DownloadHandle, event receiver)`; `DownloadHandle` offers `pause`, `resume`,
-  `cancel`, and a state watch.
+### Host — `crates/rapids-host`
 
-### CLI (`crates/rapids-cli`)
-- **`main.rs`** maps events to a terminal experience and exit codes
-  (0 completed, 2 paused by first Ctrl+C, 3 failure, 130 second Ctrl+C).
-- **`render.rs`** owns the single live progress line (terminal only; plain lines
-  otherwise). `cancel` removes a workspace that is not locked by a live process.
+- `store/db` opens SQLite, enables WAL and foreign keys, and applies the
+  migration. `store/{tasks,schedules,history,settings}` owns typed persistence;
+  the queue is a projection of waiting task rows, not a second queue table.
+- `api` validates operations on tasks, queue, settings, and schedules and
+  returns authoritative views. `wire` parses camelCase desktop requests and
+  selects one event channel per event kind.
+- `manager` serializes task/queue transitions, orders and starts eligible
+  work, tracks active runners, and recovers interrupted tasks at startup.
+  `runner` bridges engine reports and stop handles to the manager. `scheduler`
+  handles once/daily/weekly windows and retry deadlines. `store/settings`
+  reads typed values; `api` validates updates and `manager` applies live
+  limits with bounds.
+- `events` defines `TaskView`, `ProgressUpdate`, and `HostEvent`; `api` defines
+  `QueueCounts`. `progress` coalesces at most 64 task samples per batch over
+  a 500 ms window. The `EventSink` contract is `Send + Sync`; status and queue
+  changes are discrete events.
 
-### Test support (`crates/rapids-test-support`)
-- **`lib.rs`** is a thread-per-connection HTTP server on plain `std::net` serving a
-  payload generated from an index. It honours or refuses ranges, validates
-  `If-Range`, throttles per connection, drops connections early on request, and logs
-  every request with its byte count. It also counts in-flight connections and exposes
-  `wait_idle`: a killed client's last connections push their records after the kill,
-  so any byte accounting waits for the server to settle first.
+### Desktop — `src-tauri` and `src`
 
----
+- `src-tauri/adapter` opens the host under the platform-selected data path and
+  emits host events; `platform` supplies paths and clock integration;
+  `commands` maps Tauri IPC calls to the headless host. The shell owns its
+  lifetime and stops it cleanly on exit.
+- `src/lib/ipc.ts` is the typed IPC/event boundary and checks host replies.
+  `StoreProvider` hydrates from SQLite-backed host views, applies validated
+  events, and owns filter/search and queue UI state. `uiPrefs` stores only
+  sidebar collapse locally.
+- `TasksView`, `components/tasks`, `components/topbar`, and
+  `components/sidebar` render persisted tasks, category/status views, search,
+  Add Download, queue pause/resume, refresh, and applicable task actions.
+  Progress and completion come from the host, not client-side simulation.
 
-## 4. Data formats and contracts
+### Headless tools
 
-| Format | Location | Shape / rules |
-|---|---|---|
-| Host config | `src-tauri/tauri.conf.json` | identity `com.rapids.desktop`, productName `RAPIDS`, window 1180×760 (min 960×620), strict `csp` for release + `devCsp` for dev (inline scripts allowed only in dev for React Refresh; HMR socket whitelisted) |
-| Capabilities | `src-tauri/capabilities/default.json` | `core:default` for window `main` only; feature permissions are added per milestone |
-| IPC | `invoke('app_version')` | `AppInfo { name: string, version: string }`, wrapped in `lib/ipc.ts` |
-| Store state | `src/state/StoreProvider.tsx` | `{ status: 'loading' \| 'ready', tasks, viewId, query, sidebarCollapsed }` with a closed action union |
-| Task render contract | `src/types.ts` | `Task { id, fileName, status, totalBytes, speedBps, etaSeconds, category, tags, favorite, addedAt }`; `TaskStatus = queued \| downloading \| paused \| completed \| error` |
-| Views | `src/types.ts` + `navigation.ts` | `CoreViewId` (7 task/scheduled views) ∪ `TagId` (5 categories) |
-| UI prefs | `localStorage['rapids.ui']` | `{ v: 1, sidebarCollapsed: boolean }`, validated on read; non-secret UI state only — secrets never touch localStorage (rule 5 applies from the vault milestone onward) |
-| Icons | `assets/icon-1024.png` → `npx tauri icon` | regenerate the set whenever the mark changes |
-| Download sidecar | `<dest>.rapids/` next to the destination | `manifest.json` + `data.part` + `lock` (OS file lock, released automatically when the process dies). `data.part` is preallocated to the final size when a download starts, so its length never reports progress — the manifest's `written` values do. |
-| Manifest | `<dest>.rapids/manifest.json` | `{ v, url, final_url, dest, total_bytes?, accepts_ranges, etag?, last_modified?, content_type?, filename?, expected_sha256?, observed_sha256?, created_at, segments: [{ i, start, end, written }], completed }` — written temp-file → atomic rename; `written` is a conservative flushed low-water mark |
-| Resume gate | `manifest.can_resume` + part-file check | range support recorded, stored size equals the fresh probe size, part-file length equals that size, and a stored validator (ETag preferred, else Last-Modified) matches the fresh probe — otherwise wipe and restart |
-| Engine events | `spawn_download` receiver (cap 64) | `StateChanged · Progress (coalescible) · Retrying · Completed · Failed · Cancelled`; progress carries downloaded/total/speed/ETA/connections/segment counts |
-| CLI surface | `rapids get <url> [-o] [--sha256] [--connections] [--overwrite]`, `rapids cancel <path>` | exit codes: 0 completed · 2 paused by first Ctrl+C · 3 failed · 130 second Ctrl+C |
+- `rapids-cli` exposes direct get/cancel commands without the Tauri shell;
+  its `kill_resume` test exercises killed-process recovery. `rapids-test-support`
+  supplies deterministic HTTP fixtures for engine/host/CLI integration tests.
 
----
+## 4. Stored data and wire contracts
 
-## 5. Design system
+| Contract | Implemented representation and ownership |
+| --- | --- |
+| SQLite | The shell uses the platform local-data path under `RAPIDS/rapids.db` (on Windows, `%LOCALAPPDATA%\RAPIDS\rapids.db`). Migration `0001_init.sql` defines `tasks`, `schedules`, `history`, and `settings`. |
+| Task state | `queued`, `scheduled`, `downloading`, `paused`, `completed`, `error` in SQLite. Higher priority runs first; an arrival sequence breaks ties. Categories: `apps`, `movies`, `music`, `images`, `other`. History survives deletion of a task row. |
+| Settings | Database keys are snake_case; values are JSON scalars. Seeded defaults: `max_parallel=3`, `max_connections_total=48`, `global_speed_limit=null`, `resume_on_start=true`, `retry_max_attempts=3`, `retry_base_ms=5000`, `retry_cap_ms=300000`, `default_dest_dir=""`. The typed IPC `Settings` view uses camelCase. |
+| Schedule | `once`, `daily`, `weekly`, with `start_at` in epoch milliseconds; a weekly weekday mask uses Monday bit 0 through Sunday bit 6. `window_minutes=0` has no closing deadline for running work. |
+| Sidecar | For destination `<dest>`, the engine stores `<dest>.rapids/{manifest.json,data.part,lock}`. The JSON manifest records URL, total size, range support, validators, and each segment's committed offset; `data.part` is sized to the known total, so its length alone is not a progress measure. SQLite tracks display/queue state, not which bytes are safe to reuse. |
+| Resume authority | Saved bytes are eligible only if the manifest recorded range support, its total size matches the fresh probe, the stored ETag matches the fresh ETag (or, without a stored ETag, stored Last-Modified matches fresh Last-Modified), and `data.part` has the fresh size. Otherwise the engine starts a fresh transfer. Requeuing an interrupted task is not byte-level authorization. |
+| IPC/events | Commands validate requests and return camelCase task/schedule/settings views. `HostEvent` is a `kind`-tagged union on `rapids://progress`, `rapids://task-changed`, `rapids://task-removed`, and `rapids://queue-changed`. The frontend validates incoming payloads. |
+| Local UI preference | `localStorage["rapids.ui"]` holds a version-1 JSON object with `sidebarCollapsed`; it is not download state. |
 
-- Dark-first: background `#09090b` (zinc-950), text zinc-200/100, borders zinc-800.
-- Accent: emerald — `emerald-500` for actions/progress, `emerald-400` for active text.
-- Type: Inter (bundled), 13.5px base, `font-variant-numeric: tabular-nums` globally so
-  every count/speed/percent column aligns.
-- State colors: green = healthy download, amber = waiting/queued, red = error with a
-  readable message and Retry, gray = paused (applied from M3 when rows exist).
-- Motion: 150–200ms ease-out only (`motion/variants.ts` + Tailwind `duration-150
-  ease-out`). Skeleton loaders render whenever `status = 'loading'`.
-- Empty states: one helpful sentence, never a blank pane; an action button appears only
-  when a real action exists (today: "Clear search"; the Add action arrives with the
-  Add dialog in M3).
-- Controls rule: a control exists in the DOM only when it has working behavior. The
-  Add/Delete/Resume/Pause toolbar, Settings gear, and "+ New tag" are therefore
-  deferred to M3 where their handlers are real.
+The host seeds `resume_on_start=true`. On startup with that setting enabled,
+`manager::recover` requeues persisted `downloading` rows, then pumps the
+queue. The manifest/part-file gate above independently decides whether their
+bytes can be resumed. README.md describes the user-facing policy.
 
----
+## 5. Interface conventions
 
-## 6. Quality gates
+The interface uses a dark neutral palette, an emerald action accent, compact
+navigation, and host-backed status and progress. Task rows show actionable
+controls appropriate to their actual state; search and category/status views
+filter the hydrated host task list. The Add Download form submits a real
+host request. Loading and empty states do not fabricate task results.
 
-Run before every commit:
+## 6. Verification
 
-| Gate | Command | Where |
-|---|---|---|
-| Lint (zero warnings) | `npm run lint` | sandbox (enforced per commit) |
-| Types (strict, zero errors) | `npm run typecheck` | sandbox (enforced per commit) |
-| Production build | `npm run build` | sandbox (enforced per commit) |
-| Content rules | `npm run gate:content` | sandbox (enforced per commit) |
-| Rust format | `cargo fmt --all` once, then `cargo fmt --all -- --check` | toolchain host (see below) |
-| Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` | toolchain host (see below) |
-| Rust tests | `cargo test --workspace` | toolchain host (see below) |
+- Frontend: `npm ci`, `npm run gate:content`, `npm run lint`,
+  `npm run typecheck`, `npm run test:add-draft`, and `npm run build`.
+  `scripts/content-gate.mjs` rejects task markers, staged-feature phrasing,
+  invented-data markers, and filler wording.
+- Rust: `cargo fmt --all -- --check`, build, clippy with warnings denied,
+  and tests against the crates supported by the verification host. Linux
+  headless checks use the four `crates/` packages; the desktop crate needs
+  native GTK/WebKit libraries not present in that environment. The Windows
+  fence can build and test the complete workspace.
+- The CLI's standalone `cargo test -p rapids-cli --test kill_resume --locked`
+  covers a real killed process and byte-exact restart. It is a required
+  separate check after engine-touching commits.
+- At `2433b64`, independent Linux verification passed formatting, build,
+  clippy, frontend gates, and 118/0 headless tests; the Windows warm rerun
+  passed 119/0 workspace tests, the standalone kill/resume test, and the
+  desktop smoke check (details in Session 4 below).
 
-The authoring sandbox has no Rust toolchain and no route to crates.io (verified by
-probing), and no GUI libraries; the target platform is Windows 11 anyway. The three
-`cargo` gates therefore run off-sandbox: on the owner's Windows machine and in the
-independent verification environment that has rustc and registry access. Every finding
-either produces is fixed in the session that surfaced it.
+## 7. Milestones
 
-Order matters for the Rust gates: `npm run build` first, because `src-tauri` embeds
-`../dist` through `generate_context!` at compile time. Then `cargo build --workspace`,
-`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-and `cargo test --workspace`.
-
-`scripts/content-gate.mjs` scans authored text files and fails the build on task
-markers, staged-language fillers, deferred-feature phrasing, and invented-data markers
-(it exempts itself and the generated lockfile). References to
-third-party products are policed by review: the repo contains only RAPIDS and its own
-story.
-
-Frontend console rule: zero errors — bridge calls are wrapped so the shell degrades
-silently and correctly when opened outside the desktop host.
-
----
-
-## 7. Milestone roadmap
-
-| # | Milestone | Status |
-|---|---|---|
-| M0 | Scaffold: Tauri 2 + React + TS + Tailwind shell per design | **complete** (session 1) |
-| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **code complete** (sessions 2–3) — build, clippy `-D warnings`, and the full suite (28/28, acceptance included) are green on the verification toolchain; the Windows battery with rustfmt and the locked dependency resolution is the remaining gate |
-| M2 | Queue + SQLite + scheduler + limiters | pending |
-| M3 | Full UI wired to engine (both list modes, add dialog, settings, fuzzy search) | pending |
-| M4 | Vault: cookies, proxy, custom headers per task | pending |
-| M5 | Tray, notifications, shutdown-after-queue, boost mode, clipboard catcher | pending |
-| M6 | MV3 extension + native messaging host + pairing | pending |
-| M7 | FTP engine, checksums, task import/export | pending |
-| M8 | Polish: light theme, error hardening, NSIS installer, README, final review | pending |
-
-### Known seams (by design, not loose ends)
-- `StoreProvider.loadTasks()` returns an empty list — the real read path attaches the
-  SQLite store at M2; the state machine around it is already final.
-- `TasksView` returns `null` for a non-empty task list; row rendering attaches at M3
-  when the engine feeds live tasks. Every state reachable today is fully rendered.
-- Sidebar counts are real computations over the (genuinely empty) task list — they
-  become live the moment M2/M3 deliver tasks, with no wiring changes.
-- The engine and CLI are standalone; nothing in `src/` or `src-tauri/` calls
-  `spawn_download` yet (fence for M1). The desktop host attaches at M2/M3.
-- `Cargo.lock` appears with the first `cargo build` on Windows and is committed then.
-- The authoring sandbox has no Rust compiler, so the engine is proven by independent
-  compile runs. The first one showed that `rapids-test-support` had never compiled at
-  all; its findings are repaired and recorded below. M1 stays code complete until a run
-  is green, and a red run is repaired in the session that reports it.
-
----
+| Milestone | Status |
+| --- | --- |
+| M0 — shell foundation | complete |
+| M1 — HTTP(S) engine and CLI | complete |
+| M2 — persistent queue, host, scheduler, limits, and live task interface | **closed 2026-10-21** at `2433b64` |
+| M3 | authorized, planning in progress |
 
 ## 8. Session log
+
+Sessions 1–3 below are historical notes written before M2 closed. References
+to work pending or formatting debt describe those earlier checkpoints, not
+this document's current status.
 
 ### Session 1 — M0 scaffold
 Commits: `chore: initialize repository tooling…` → `feat(ui): dark app shell…` →
@@ -439,3 +344,28 @@ the source hash. Two findings remained.
 With these two applied the engine side is complete on the verification toolchain:
 build clean, clippy `-D warnings` clean across all three crates and all targets, 28/28
 tests. rustfmt normalization and `Cargo.lock` remain with the Windows battery.
+
+### Session 4 — M2 close (2026-10-21)
+
+- The implemented M2 stack separates the headless SQLite host from the thin
+  Tauri adapter and live task interface. The manager owns ordered work,
+  schedules, retries, settings-driven app-wide limits, and startup recovery;
+  the engine owns network transfers, sidecar checkpoints, and byte reuse.
+  `resume_on_start` is seeded `true`: interrupted `downloading` rows requeue,
+  but only the engine's recorded-range/size/validator/part-length gate can
+  reuse their bytes.
+- The final M2 code and test-only rate-band correction were fenced at
+  `2433b6444198d8353a43dfa96d9ae14cb56aca7b`. Independent Linux
+  verification passed 118/0 headless tests, plus build, clippy, formatting,
+  and frontend checks. No exact aggregate throughput measurement was
+  reported by the passing rate test.
+- The operator's Windows warm rerun on that clean tip passed the full
+  workspace suite (119 passed, 0 failed, 0 ignored), the standalone
+  `kill_resume` test (1 passed; test time 14.50 s), and five of five Tauri
+  smoke checks: window launch, empty-list/no-service-error state, queue
+  pause/resume, a real 2,097,152-byte download with byte-exact SHA-256, and
+  persistence of two completed tasks and their hashes after restart. Source
+  and completed file SHA-256 matched:
+  `5647F05EC18958947D32874EEB788FA396A05D0BAB7C1B71F112CEB7E9B31EEE`.
+- The verifier declared **M2 closed** at `2433b64`. This documentation
+  update records that closure; it does not change product behavior.
