@@ -234,6 +234,21 @@ pub async fn waiting(pool: &SqlitePool) -> Result<Vec<TaskRow>, HostError> {
     .map_err(|error| HostError::database("read queue", error))
 }
 
+/// The rows that may start at `now`: queued work whose retry, if it is
+/// waiting for one, is already due. Rows are handed out in the order the queue
+/// runs them, so the caller does not sort.
+pub async fn due(pool: &SqlitePool, now: i64) -> Result<Vec<TaskRow>, HostError> {
+    sqlx::query_as::<_, TaskRow>(
+        "SELECT * FROM tasks WHERE status = 'queued' \
+         AND (next_attempt_at IS NULL OR next_attempt_at <= ?) \
+         ORDER BY priority DESC, sequence ASC",
+    )
+    .bind(now)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| HostError::database("read due work", error))
+}
+
 pub async fn by_status(pool: &SqlitePool, status: TaskStatus) -> Result<Vec<TaskRow>, HostError> {
     sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE status = ? ORDER BY id DESC")
         .bind(status.as_str())
@@ -369,6 +384,33 @@ pub async fn set_failure(
     .map_err(|error| HostError::database("record failure", error))?;
     if result.rows_affected() == 0 {
         return Err(HostError::NotFound { entity: "task", id });
+    }
+    Ok(())
+}
+
+/// Puts a failed task back in the queue with a fresh retry budget. The stored
+/// message is cleared because it describes an attempt that is now history.
+pub async fn clear_failure(
+    pool: &SqlitePool,
+    id: i64,
+    status: TaskStatus,
+    now: i64,
+) -> Result<(), HostError> {
+    let result = sqlx::query(
+        "UPDATE tasks SET status = ?, error_message = NULL, attempts = 0, \
+         next_attempt_at = NULL, speed_bps = 0, updated_at = ? WHERE id = ?",
+    )
+    .bind(status.as_str())
+    .bind(now)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|error| HostError::database("requeue task", error))?;
+    if result.rows_affected() == 0 {
+        return Err(HostError::NotFound {
+            entity: "task",
+            id,
+        });
     }
     Ok(())
 }

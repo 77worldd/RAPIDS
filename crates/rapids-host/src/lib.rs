@@ -10,11 +10,13 @@ pub mod error;
 pub mod events;
 pub mod manager;
 mod runner;
+pub mod scheduler;
 pub mod store;
 
 pub use error::HostError;
 pub use events::{EventSink, HostEvent, NullSink, ProgressUpdate, RecordingSink, TaskView};
 pub use manager::{AddRequest, ManagerHandle};
+pub use scheduler::{Clock, Window};
 
 /// Milliseconds since the Unix epoch. Callers pass the clock in rather than
 /// letting queries read it, so tests can place a task in the past or the

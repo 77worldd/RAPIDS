@@ -25,6 +25,9 @@ pub(crate) enum Report {
     Failed {
         id: i64,
         message: String,
+        /// Classified by the engine where the error was raised. The runner
+        /// passes it through rather than deciding anything itself.
+        retryable: bool,
     },
     Cancelled {
         id: i64,
@@ -75,8 +78,17 @@ pub(crate) fn start(
                     let _ = reports.send(Report::Completed { id, sha256 }).await;
                     break;
                 }
-                EngineEvent::Failed { message } => {
-                    let _ = reports.send(Report::Failed { id, message }).await;
+                EngineEvent::Failed {
+                    message,
+                    retryable,
+                } => {
+                    let _ = reports
+                        .send(Report::Failed {
+                            id,
+                            message,
+                            retryable,
+                        })
+                        .await;
                     break;
                 }
                 EngineEvent::Cancelled => {

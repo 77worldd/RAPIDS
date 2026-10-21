@@ -105,6 +105,14 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<ScheduleRow>, HostError> {
         .map_err(|error| HostError::database("list schedules", error))
 }
 
+pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<ScheduleRow>, HostError> {
+    sqlx::query_as::<_, ScheduleRow>("SELECT * FROM schedules WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| HostError::database("read schedule", error))
+}
+
 pub async fn set_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Result<(), HostError> {
     let result = sqlx::query("UPDATE schedules SET enabled = ? WHERE id = ?")
         .bind(if enabled { 1_i64 } else { 0_i64 })

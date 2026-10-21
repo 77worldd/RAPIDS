@@ -199,10 +199,14 @@ impl Coordinator {
     }
 
     async fn fail(&self, error: EngineError) {
+        // The classification happens here, where the concrete error is still
+        // in hand, so no caller ever has to infer it from the message.
+        let retryable = error.is_retryable();
         apply_control(&self.control, |flags| flags.aborted = true);
         self.transition(DownloadState::Failed).await;
         self.emit(EngineEvent::Failed {
             message: error.to_string(),
+            retryable,
         })
         .await;
     }

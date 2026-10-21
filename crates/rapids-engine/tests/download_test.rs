@@ -274,11 +274,15 @@ async fn second_process_is_rejected_while_the_lock_is_held() {
     .await;
     drop(second);
     match failure {
-        EngineEvent::Failed { message } => {
+        EngineEvent::Failed {
+            message,
+            retryable,
+        } => {
             assert!(
                 message.contains("working on"),
                 "message should identify the busy workspace: {message}"
             );
+            assert!(retryable, "a busy workspace is worth another attempt");
         }
         other => panic!("expected rejection, got {other}"),
     }
@@ -352,11 +356,15 @@ async fn mid_download_validator_change_fails_the_task() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed { message } => {
+        EngineEvent::Failed {
+            message,
+            retryable,
+        } => {
             assert!(
                 message.contains("changed on the server"),
                 "failure should explain the content change: {message}"
             );
+            assert!(retryable, "replanning against the new bytes can succeed");
         }
         other => panic!("expected failure, got {other}"),
     }
@@ -382,7 +390,10 @@ async fn mismatched_expected_sha_reports_both_hashes() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed { message } => {
+        EngineEvent::Failed {
+            message,
+            retryable,
+        } => {
             assert!(message.contains("SHA-256 verification failed"));
             assert!(
                 message.contains(&wrong),
@@ -392,6 +403,7 @@ async fn mismatched_expected_sha_reports_both_hashes() {
                 message.contains(&actual),
                 "message must show what was computed"
             );
+            assert!(!retryable, "the same bytes will hash the same way again");
         }
         other => panic!("expected verification failure, got {other}"),
     }

@@ -65,6 +65,10 @@ pub enum EngineEvent {
     },
     Failed {
         message: String,
+        /// Whether trying again could succeed. It is decided from the concrete
+        /// error where it was raised, so nothing downstream has to read the
+        /// message to tell a dead link from a dropped connection.
+        retryable: bool,
     },
     Cancelled,
 }
@@ -119,7 +123,7 @@ impl fmt::Display for EngineEvent {
                 Some(hash) => write!(f, "completed: {} · sha256 {hash}", path.display()),
                 None => write!(f, "completed: {}", path.display()),
             },
-            Self::Failed { message } => write!(f, "failed: {message}"),
+            Self::Failed { message, .. } => write!(f, "failed: {message}"),
             Self::Cancelled => f.write_str("cancelled"),
         }
     }

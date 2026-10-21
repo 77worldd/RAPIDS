@@ -6,7 +6,7 @@ use rapids_host::events::{EventSink, HostEvent, RecordingSink};
 use rapids_host::store::{
     Store, TaskCategory, TaskRow, TaskStatus, history, settings, tasks,
 };
-use rapids_host::{AddRequest, HostError, ManagerHandle, now_ms};
+use rapids_host::{AddRequest, Clock, HostError, ManagerHandle, now_ms};
 use rapids_test_support::{TestServer, expected_sha256, options};
 use tokio::task::JoinHandle;
 
@@ -33,7 +33,8 @@ impl Harness {
         );
         let sink = Arc::new(RecordingSink::new());
         let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-        let (manager, join) = rapids_host::manager::spawn(Arc::clone(&store), sink_port);
+        let (manager, join) =
+            rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
         Self {
             store,
             manager,
@@ -421,7 +422,8 @@ async fn interrupted_rows_return_to_the_queue_on_startup() {
 
     let sink = Arc::new(RecordingSink::new());
     let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-    let (manager, join) = rapids_host::manager::spawn(Arc::clone(&store), sink_port);
+    let (manager, join) =
+        rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
 
     // The interrupted row is back in the queue, waiting behind the task that
     // took the single slot; nothing about it was resumed from the database.

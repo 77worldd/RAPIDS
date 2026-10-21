@@ -7,21 +7,30 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rapids_engine::{DownloadHandle, DownloadSpec, EngineConfig, filename_from_url};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use tokio::time::MissedTickBehavior;
 
 use crate::error::HostError;
 use crate::events::{EventSink, HostEvent, TaskView};
 use crate::now_ms;
 use crate::runner::{self, Report};
+use crate::scheduler::{self, Clock, Window};
 use crate::store::settings;
 use crate::store::{
     history::{self, NewHistory},
+    schedules::{self, ScheduleRow},
     tasks::{self, NewTask, TaskCategory, TaskRow, TaskStatus},
     Outcome, Store,
 };
+
+/// How often the manager looks at the clock. A second is fine-grained enough
+/// for a start window and coarse enough that an idle app wakes four times a
+/// minute at most.
+const TICK: Duration = Duration::from_secs(1);
 
 /// Everything a caller must supply to enqueue work.
 #[derive(Debug, Clone)]
@@ -156,6 +165,12 @@ impl ManagerHandle {
     }
 }
 
+/// The schedule a row points at, when the view loaded this beat has it.
+fn schedule_for(schedules: &[ScheduleRow], id: Option<i64>) -> Option<&ScheduleRow> {
+    let id = id?;
+    schedules.iter().find(|schedule| schedule.id == id)
+}
+
 async fn receive<T>(answer: oneshot::Receiver<Result<T, HostError>>) -> Result<T, HostError> {
     match answer.await {
         Ok(result) => result,
@@ -169,11 +184,15 @@ async fn receive<T>(answer: oneshot::Receiver<Result<T, HostError>>) -> Result<T
 enum Incoming {
     Command(Option<Command>),
     Report(Option<Report>),
+    /// The scheduler's beat: windows are re-read and due work may start.
+    Tick,
 }
 
 struct Manager {
     store: Arc<Store>,
     sink: Arc<dyn EventSink>,
+    clock: Clock,
+    ticker: tokio::time::Interval,
     running: HashMap<i64, DownloadHandle>,
     reports: mpsc::Sender<Report>,
     report_rx: mpsc::Receiver<Report>,
@@ -182,12 +201,25 @@ struct Manager {
 
 /// Starts the manager task. The returned handle is how callers talk to it;
 /// the join handle completes when the manager stops.
-pub fn spawn(store: Arc<Store>, sink: Arc<dyn EventSink>) -> (ManagerHandle, JoinHandle<()>) {
+///
+/// `clock` is the wall clock start windows are read against. The caller owns
+/// it because only the platform layer knows the machine's offset from UTC.
+pub fn spawn(
+    store: Arc<Store>,
+    sink: Arc<dyn EventSink>,
+    clock: Clock,
+) -> (ManagerHandle, JoinHandle<()>) {
     let (command_tx, command_rx) = mpsc::channel(64);
     let (report_tx, report_rx) = mpsc::channel(256);
+    let mut ticker = tokio::time::interval(TICK);
+    // A tick that arrives while a handler is busy is not worth a burst of
+    // catch-up work afterwards; the next beat is due one interval later.
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let manager = Manager {
         store,
         sink,
+        clock,
+        ticker,
         running: HashMap::new(),
         reports: report_tx,
         report_rx,
@@ -213,6 +245,7 @@ impl Manager {
             let incoming = tokio::select! {
                 command = self.commands.recv() => Incoming::Command(command),
                 report = self.report_rx.recv() => Incoming::Report(report),
+                _ = self.ticker.tick() => Incoming::Tick,
             };
             match incoming {
                 Incoming::Command(Some(command)) => {
@@ -225,6 +258,7 @@ impl Manager {
                 // The manager holds a sender of its own, so this cannot
                 // happen; stopping is safer than spinning if it ever did.
                 Incoming::Report(None) => break,
+                Incoming::Tick => self.tick().await,
             }
         }
     }
@@ -243,27 +277,105 @@ impl Manager {
         self.pump().await
     }
 
-    /// Starts waiting work while there is room. Scheduled rows are left for
-    /// the scheduler; only rows already due are started here.
+    /// Starts due work while there is room.
+    ///
+    /// A queued row can still be waiting for two reasons, and both are
+    /// honoured here rather than in the query: its retry may not be due yet,
+    /// and its window may not be open. Scheduled rows are never picked up —
+    /// the tick moves them into the queue when their window opens.
     async fn pump(&mut self) -> Result<(), HostError> {
         let max_parallel = settings::get_i64(self.store.pool(), settings::MAX_PARALLEL, 3)
             .await
             .unwrap_or(3)
             .clamp(1, 32);
         let max_parallel = usize::try_from(max_parallel).unwrap_or(3);
+        let schedules = schedules::list(self.store.pool())
+            .await
+            .unwrap_or_default();
         while self.running.len() < max_parallel {
-            let waiting = tasks::waiting(self.store.pool()).await?;
-            let next = waiting.into_iter().find(|row| {
-                row.status_enum() == Some(TaskStatus::Queued) && !self.running.contains_key(&row.id)
-            });
+            let due = tasks::due(self.store.pool(), now_ms()).await?;
+            let mut next = None;
+            for row in due {
+                if self.running.contains_key(&row.id) {
+                    continue;
+                }
+                if !self.window_open(&row, now_ms(), &schedules) {
+                    continue;
+                }
+                next = Some(row);
+                break;
+            }
             let Some(row) = next else {
                 return Ok(());
             };
             if let Err(error) = self.start(&row).await {
-                self.record_failure(row.id, &error.to_string()).await;
+                // The engine refused the work itself, so nothing about the
+                // network applies: this attempt is not worth repeating.
+                self.record_failure(row.id, &error.to_string(), false).await;
             }
         }
         Ok(())
+    }
+
+    /// One scheduler beat: open windows release their work, then the queue
+    /// fills whatever room is left.
+    ///
+    /// Windows gate starts only. A transfer that is already running when its
+    /// window closes carries on: the engine's only way out of a workspace is
+    /// to discard it, and throwing away bytes the person already paid for is
+    /// not something a clock should decide.
+    async fn tick(&mut self) {
+        let now = now_ms();
+        let schedules = schedules::list(self.store.pool())
+            .await
+            .unwrap_or_default();
+        if !schedules.is_empty() {
+            self.reconcile_windows(now, &schedules).await;
+        }
+        let _ = self.pump().await;
+    }
+
+    /// Keeps the queue and the windows in agreement.
+    ///
+    /// A scheduled row whose window is open joins the queue, and a queued row
+    /// whose window has closed goes back to waiting. Running work is not in
+    /// either set, so a transfer that is under way is never disturbed.
+    async fn reconcile_windows(&mut self, now: i64, schedules: &[ScheduleRow]) {
+        let Ok(waiting) = tasks::waiting(self.store.pool()).await else {
+            return;
+        };
+        for row in waiting {
+            let Some(schedule) = schedule_for(schedules, row.schedule_id) else {
+                continue;
+            };
+            let open = schedule.is_enabled()
+                && scheduler::window_state(schedule, now, self.clock) == Window::Open;
+            let wanted = match (row.status_enum(), open) {
+                (Some(TaskStatus::Scheduled), true) => TaskStatus::Queued,
+                (Some(TaskStatus::Queued), false) => TaskStatus::Scheduled,
+                _ => continue,
+            };
+            if tasks::set_status(self.store.pool(), row.id, wanted, now)
+                .await
+                .is_ok()
+            {
+                self.emit_changed(row.id).await;
+            }
+        }
+    }
+
+    /// Whether a row tied to a schedule may start. A row whose schedule has
+    /// gone missing stays parked: the foreign key clears the link when a
+    /// schedule is deleted, so anything left pointing at nothing is a state
+    /// worth refusing rather than guessing about.
+    fn window_open(&self, row: &TaskRow, now: i64, schedules: &[ScheduleRow]) -> bool {
+        match schedule_for(schedules, row.schedule_id) {
+            None => row.schedule_id.is_none(),
+            Some(schedule) => {
+                schedule.is_enabled()
+                    && scheduler::window_state(schedule, now, self.clock) == Window::Open
+            }
+        }
     }
 
     async fn start(&mut self, row: &TaskRow) -> Result<(), HostError> {
@@ -417,8 +529,13 @@ impl Manager {
             reason: format!("task {id} has an unknown status"),
         })?;
         match status {
-            TaskStatus::Paused | TaskStatus::Error => {
+            TaskStatus::Paused => {
                 tasks::set_status(self.store.pool(), id, TaskStatus::Queued, now_ms()).await?;
+                self.emit_changed(id).await;
+                self.pump().await
+            }
+            TaskStatus::Error => {
+                tasks::clear_failure(self.store.pool(), id, TaskStatus::Queued, now_ms()).await?;
                 self.emit_changed(id).await;
                 self.pump().await
             }
@@ -432,7 +549,9 @@ impl Manager {
         if row.status_enum() != Some(TaskStatus::Error) {
             return Err(HostError::invalid("only a failed download can be retried"));
         }
-        tasks::set_status(self.store.pool(), id, TaskStatus::Queued, now_ms()).await?;
+        // Asking for a retry by hand is a fresh decision, so the automatic
+        // attempts that were spent do not shorten the new run's budget.
+        tasks::clear_failure(self.store.pool(), id, TaskStatus::Queued, now_ms()).await?;
         self.emit_changed(id).await;
         self.pump().await
     }
@@ -518,9 +637,13 @@ impl Manager {
                 }
                 let _ = self.pump().await;
             }
-            Report::Failed { id, message } => {
+            Report::Failed {
+                id,
+                message,
+                retryable,
+            } => {
                 self.running.remove(&id);
-                self.record_failure(id, &message).await;
+                self.record_failure(id, &message, retryable).await;
                 let _ = self.pump().await;
             }
             Report::Cancelled { id } => {
@@ -529,23 +652,67 @@ impl Manager {
         }
     }
 
-    async fn record_failure(&mut self, id: i64, message: &str) {
-        let attempts = self.row(id).await.map(|row| row.attempts + 1).unwrap_or(1);
+    /// Records a failed attempt, as either a waiting retry or a final error.
+    ///
+    /// The engine's classification decides, and the attempt counter bounds it:
+    /// a retryable failure with budget left goes back to the queue with a due
+    /// time, and everything else stops here.
+    async fn record_failure(&mut self, id: i64, message: &str, retryable: bool) {
+        let Ok(row) = self.row(id).await else {
+            return;
+        };
+        let now = now_ms();
+        let attempts = row.attempts + 1;
+        let delay = if retryable {
+            self.retry_delay(attempts).await
+        } else {
+            None
+        };
+        let (status, next_attempt_at) = match delay {
+            Some(delay) => (TaskStatus::Queued, Some(now.saturating_add(delay))),
+            None => (TaskStatus::Error, None),
+        };
+
         if tasks::set_failure(
             self.store.pool(),
             id,
-            TaskStatus::Error,
+            status,
             message,
             attempts,
-            None,
-            now_ms(),
+            next_attempt_at,
+            now,
         )
         .await
-        .is_ok()
+        .is_err()
         {
-            self.record_history(id, Outcome::Failed).await;
-            self.emit_changed(id).await;
+            return;
         }
+
+        // An attempt that will be repeated is not an outcome. History records
+        // what finally happened, so a server that is briefly down does not
+        // fill it with rows about one download.
+        if status == TaskStatus::Error {
+            self.record_history(id, Outcome::Failed).await;
+        }
+        self.emit_changed(id).await;
+    }
+
+    /// The wait before the next attempt, or `None` when the budget is spent.
+    async fn retry_delay(&self, attempts: i64) -> Option<i64> {
+        let pool = self.store.pool();
+        let max = settings::get_i64(pool, settings::RETRY_MAX_ATTEMPTS, 3)
+            .await
+            .unwrap_or(3);
+        if max <= 0 || attempts >= max {
+            return None;
+        }
+        let base = settings::get_i64(pool, settings::RETRY_BASE_MS, 5_000)
+            .await
+            .unwrap_or(5_000);
+        let cap = settings::get_i64(pool, settings::RETRY_CAP_MS, 300_000)
+            .await
+            .unwrap_or(300_000);
+        Some(scheduler::retry_delay_ms(base, cap, attempts))
     }
 
     async fn record_history(&self, id: i64, outcome: Outcome) {
