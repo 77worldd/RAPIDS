@@ -46,11 +46,8 @@ impl Pending {
     fn start(self) -> Harness {
         let sink = Arc::new(RecordingSink::new());
         let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-        let (manager, join) = rapids_host::manager::spawn(
-            Arc::clone(&self.store),
-            sink_port,
-            Clock::utc(),
-        );
+        let (manager, join) =
+            rapids_host::manager::spawn(Arc::clone(&self.store), sink_port, Clock::utc());
         Harness {
             store: self.store,
             manager,
@@ -198,7 +195,11 @@ async fn a_retryable_failure_waits_its_backoff_and_tries_again() {
         })
         .await;
     let due = waiting.next_attempt_at.expect("a retry is scheduled");
-    assert_eq!(due - waiting.updated_at, 800, "first wait is the base delay");
+    assert_eq!(
+        due - waiting.updated_at,
+        800,
+        "first wait is the base delay"
+    );
     let now = now_ms();
     assert!(
         due > now,
@@ -441,11 +442,7 @@ async fn a_one_off_window_releases_its_task_when_it_opens() {
     let mut request = harness.request(&server.url("/payload.bin"));
     request.schedule_id = Some(schedule);
     let view = harness.manager.add(request).await.expect("add");
-    assert_eq!(
-        view.status,
-        "scheduled",
-        "a windowed task starts waiting"
-    );
+    assert_eq!(view.status, "scheduled", "a windowed task starts waiting");
 
     // Before the window opens the task must not have touched the network.
     tokio::time::sleep(Duration::from_millis(300)).await;

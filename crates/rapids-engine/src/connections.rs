@@ -141,11 +141,13 @@ mod tests {
         drop(first);
         assert_eq!(budget.in_use(), 1);
         let waiting = Arc::clone(&budget);
-        let waiter = tokio::spawn(async move {
-            waiting.acquire_while(|| true).await.expect("new lease")
-        });
+        let waiter =
+            tokio::spawn(async move { waiting.acquire_while(|| true).await.expect("new lease") });
         tokio::task::yield_now().await;
-        assert!(!waiter.is_finished(), "the remaining lease uses the new cap");
+        assert!(
+            !waiter.is_finished(),
+            "the remaining lease uses the new cap"
+        );
         drop(second);
         let third = waiter.await.expect("waiter joined");
         assert_eq!(budget.in_use(), 1);

@@ -250,18 +250,24 @@ async fn stopping_releases_the_workspace_for_a_byte_perfect_restart() {
     );
     assert!(workspace.part_path.exists(), "the part file survives stop");
     assert!(!dest.exists(), "a partial file is never published");
-    assert!(saved.can_resume(Some(total), saved.etag.as_deref(), saved.last_modified.as_deref()));
+    assert!(saved.can_resume(
+        Some(total),
+        saved.etag.as_deref(),
+        saved.last_modified.as_deref()
+    ));
 
     // The first handle is deliberately still alive: stop, not dropping the
     // process or handle, is what must release the operating-system lock.
     let mut available = Workspace::for_dest(&dest);
     available.create_and_lock().await.expect("lock released");
     drop(available);
-    assert!(server.wait_idle(Duration::from_secs(10)), "old requests settled");
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "old requests settled"
+    );
     server.clear_requests();
 
-    let (second, mut second_rx) =
-        spawn_download(spec, EngineConfig::default()).expect("restart");
+    let (second, mut second_rx) = spawn_download(spec, EngineConfig::default()).expect("restart");
     let completed = wait_for(&mut second_rx, 60, "resumed completion", |event| {
         matches!(event, EngineEvent::Completed { .. })
     })
@@ -276,7 +282,10 @@ async fn stopping_releases_the_workspace_for_a_byte_perfect_restart() {
         other => panic!("expected completion, got {other}"),
     }
     assert!(!workspace.dir.exists(), "completed sidecar is removed");
-    assert!(server.wait_idle(Duration::from_secs(10)), "resumed requests settled");
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "resumed requests settled"
+    );
 
     let requests = server.requests();
     let refetched: u64 = requests
@@ -289,13 +298,16 @@ async fn stopping_releases_the_workspace_for_a_byte_perfect_restart() {
         "the restart fetched {refetched} of {total} bytes"
     );
     assert!(
-        requests.iter().filter_map(|record| record.range.as_deref()).any(|range| {
-            range
-                .strip_prefix("bytes=")
-                .and_then(|value| value.split_once('-'))
-                .and_then(|(start, _)| start.parse::<u64>().ok())
-                .is_some_and(|start| start > 0)
-        }),
+        requests
+            .iter()
+            .filter_map(|record| record.range.as_deref())
+            .any(|range| {
+                range
+                    .strip_prefix("bytes=")
+                    .and_then(|value| value.split_once('-'))
+                    .and_then(|(start, _)| start.parse::<u64>().ok())
+                    .is_some_and(|start| start > 0)
+            }),
         "a resumable request starts after byte zero"
     );
 }
@@ -318,12 +330,19 @@ async fn stopping_a_paused_download_unlocks_without_deleting_bytes() {
     .await;
     handle.pause().await;
     wait_for(&mut rx, 15, "pause", |event| {
-        matches!(event, EngineEvent::StateChanged { state: rapids_engine::DownloadState::Paused })
+        matches!(
+            event,
+            EngineEvent::StateChanged {
+                state: rapids_engine::DownloadState::Paused
+            }
+        )
     })
     .await;
 
     let workspace = Workspace::for_dest(&dest);
-    let before = Manifest::load(&workspace.dir).await.expect("paused manifest");
+    let before = Manifest::load(&workspace.dir)
+        .await
+        .expect("paused manifest");
     let saved_before: u64 = before.segments.iter().map(|segment| segment.written).sum();
     assert!(saved_before > 0);
     let mut claimant = Workspace::for_dest(&dest);
@@ -339,10 +358,18 @@ async fn stopping_a_paused_download_unlocks_without_deleting_bytes() {
         .await
         .expect("stop while paused");
     assert_eq!(handle.state(), rapids_engine::DownloadState::Stopped);
-    wait_for(&mut rx, 15, "stopped", |event| matches!(event, EngineEvent::Stopped)).await;
-    claimant.create_and_lock().await.expect("stop released lock");
+    wait_for(&mut rx, 15, "stopped", |event| {
+        matches!(event, EngineEvent::Stopped)
+    })
+    .await;
+    claimant
+        .create_and_lock()
+        .await
+        .expect("stop released lock");
     drop(claimant);
-    let after = Manifest::load(&workspace.dir).await.expect("stopped manifest");
+    let after = Manifest::load(&workspace.dir)
+        .await
+        .expect("stopped manifest");
     let saved_after: u64 = after.segments.iter().map(|segment| segment.written).sum();
     assert!(saved_after >= saved_before);
     assert!(workspace.part_path.exists());
@@ -366,8 +393,14 @@ async fn stopping_before_the_probe_does_not_start_network_work() {
         .await
         .expect("stop before probe");
     assert_eq!(handle.state(), rapids_engine::DownloadState::Stopped);
-    wait_for(&mut rx, 15, "stopped", |event| matches!(event, EngineEvent::Stopped)).await;
-    assert!(server.wait_idle(Duration::from_secs(10)), "requests settled");
+    wait_for(&mut rx, 15, "stopped", |event| {
+        matches!(event, EngineEvent::Stopped)
+    })
+    .await;
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "requests settled"
+    );
     assert!(server.requests().is_empty(), "stop prevented a probe");
     assert!(!dest.exists());
     let mut claimant = Workspace::for_dest(&dest);
@@ -439,10 +472,7 @@ async fn second_process_is_rejected_while_the_lock_is_held() {
     .await;
     drop(second);
     match failure {
-        EngineEvent::Failed {
-            message,
-            retryable,
-        } => {
+        EngineEvent::Failed { message, retryable } => {
             assert!(
                 message.contains("working on"),
                 "message should identify the busy workspace: {message}"
@@ -521,10 +551,7 @@ async fn mid_download_validator_change_fails_the_task() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed {
-            message,
-            retryable,
-        } => {
+        EngineEvent::Failed { message, retryable } => {
             assert!(
                 message.contains("changed on the server"),
                 "failure should explain the content change: {message}"
@@ -555,10 +582,7 @@ async fn mismatched_expected_sha_reports_both_hashes() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed {
-            message,
-            retryable,
-        } => {
+        EngineEvent::Failed { message, retryable } => {
             assert!(message.contains("SHA-256 verification failed"));
             assert!(
                 message.contains(&wrong),

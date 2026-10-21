@@ -6,11 +6,11 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use crate::ScheduleInput;
 use crate::error::HostError;
 use crate::events::HostEvent;
 use crate::manager::AddRequest;
 use crate::store::{ScheduleKind, TaskCategory};
-use crate::ScheduleInput;
 
 /// A request from the interface to enqueue a download. An absent or blank
 /// destination uses the platform-selected directory; priority defaults to
@@ -31,7 +31,9 @@ pub struct TaskAddInput {
 
 impl TaskAddInput {
     pub fn needs_default_dir(&self) -> bool {
-        self.dest_dir.as_ref().is_none_or(|dir| dir.trim().is_empty())
+        self.dest_dir
+            .as_ref()
+            .is_none_or(|dir| dir.trim().is_empty())
     }
 
     pub fn into_request(self, fallback_dir: Option<PathBuf>) -> Result<AddRequest, HostError> {
@@ -82,9 +84,8 @@ pub struct ScheduleCreateInput {
 
 impl ScheduleCreateInput {
     pub fn into_input(self) -> Result<ScheduleInput, HostError> {
-        let kind = ScheduleKind::parse(&self.kind).ok_or_else(|| {
-            HostError::invalid(format!("unknown schedule kind: {}", self.kind))
-        })?;
+        let kind = ScheduleKind::parse(&self.kind)
+            .ok_or_else(|| HostError::invalid(format!("unknown schedule kind: {}", self.kind)))?;
         Ok(ScheduleInput {
             label: self.label,
             kind,
@@ -191,16 +192,20 @@ mod tests {
 
     #[test]
     fn misspelled_fields_and_missing_category_are_not_silently_defaulted() {
-        assert!(serde_json::from_value::<TaskAddInput>(json!({
-            "url": "https://rapids.invalid/archive.zip",
-            "category": "apps",
-            "schedule_id": 17
-        }))
-        .is_err());
-        assert!(serde_json::from_value::<TaskAddInput>(json!({
-            "url": "https://rapids.invalid/archive.zip"
-        }))
-        .is_err());
+        assert!(
+            serde_json::from_value::<TaskAddInput>(json!({
+                "url": "https://rapids.invalid/archive.zip",
+                "category": "apps",
+                "schedule_id": 17
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<TaskAddInput>(json!({
+                "url": "https://rapids.invalid/archive.zip"
+            }))
+            .is_err()
+        );
     }
 
     #[test]
@@ -284,7 +289,11 @@ mod tests {
                 "rapids://progress",
                 "progress",
             ),
-            (HostEvent::QueueChanged, "rapids://queue-changed", "queueChanged"),
+            (
+                HostEvent::QueueChanged,
+                "rapids://queue-changed",
+                "queueChanged",
+            ),
         ];
         for (event, channel, kind) in routed {
             assert_eq!(event_channel(&event), channel);

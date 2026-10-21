@@ -171,8 +171,10 @@ pub(crate) async fn worker_loop(
         let _ = coord.send(CoordMsg::Started).await;
 
         let atomic = &progress[index];
-        let result = run_with_retries(&context, segment, &control, &mut wake, atomic, &coord, &active)
-            .await;
+        let result = run_with_retries(
+            &context, segment, &control, &mut wake, atomic, &coord, &active,
+        )
+        .await;
 
         match result {
             Ok(RunOutcome::Done) => {
@@ -205,7 +207,10 @@ async fn run_with_retries(
         // bandwidth tokens. Return it before reporting a retry or sleeping
         // through backoff; no parked worker holds a network connection.
         let lease = if let Some(budget) = &context.config.connection_budget {
-            match budget.acquire_while(|| !control.borrow().stop_requested()).await {
+            match budget
+                .acquire_while(|| !control.borrow().stop_requested())
+                .await
+            {
                 Some(lease) => Some(lease),
                 None => return Ok(RunOutcome::Stopped),
             }

@@ -24,10 +24,10 @@ use crate::runner::{self, Report};
 use crate::scheduler::{self, Clock, Window};
 use crate::store::settings;
 use crate::store::{
+    Outcome, Store,
     history::{self, NewHistory},
     schedules::{self, ScheduleRow},
     tasks::{self, NewTask, TaskCategory, TaskRow, TaskStatus},
-    Outcome, Store,
 };
 
 /// How often the manager looks at the clock. A second is fine-grained enough
@@ -168,7 +168,12 @@ impl ManagerHandle {
 
     pub async fn reorder(&self, id: i64, priority: i64) -> Result<(), HostError> {
         let (reply, answer) = oneshot::channel();
-        self.send(Command::Reorder { id, priority, reply }).await?;
+        self.send(Command::Reorder {
+            id,
+            priority,
+            reply,
+        })
+        .await?;
         receive(answer).await
     }
 
@@ -208,9 +213,10 @@ impl ManagerHandle {
     }
 
     async fn send(&self, command: Command) -> Result<(), HostError> {
-        self.commands.send(command).await.map_err(|_| {
-            HostError::invalid("the download manager is no longer running")
-        })
+        self.commands
+            .send(command)
+            .await
+            .map_err(|_| HostError::invalid("the download manager is no longer running"))
     }
 }
 
@@ -389,9 +395,7 @@ impl Manager {
         let max_parallel = usize::try_from(max_parallel)
             .unwrap_or(3)
             .min(self.connections.limit());
-        let schedules = schedules::list(self.store.pool())
-            .await
-            .unwrap_or_default();
+        let schedules = schedules::list(self.store.pool()).await.unwrap_or_default();
         while self.running.len() < max_parallel {
             let due = tasks::due(self.store.pool(), now_ms()).await?;
             let mut next = None;
@@ -426,9 +430,7 @@ impl Manager {
     /// not something a clock should decide.
     async fn tick(&mut self) {
         let now = now_ms();
-        let schedules = schedules::list(self.store.pool())
-            .await
-            .unwrap_or_default();
+        let schedules = schedules::list(self.store.pool()).await.unwrap_or_default();
         if !schedules.is_empty() {
             self.reconcile_windows(now, &schedules).await;
         }
@@ -570,7 +572,11 @@ impl Manager {
                 let _ = reply.send(result);
                 false
             }
-            Command::Reorder { id, priority, reply } => {
+            Command::Reorder {
+                id,
+                priority,
+                reply,
+            } => {
                 let result = self.reorder(id, priority).await;
                 let _ = reply.send(result);
                 false
@@ -653,14 +659,10 @@ impl Manager {
     }
 
     async fn pause(&mut self, id: i64) -> Result<(), HostError> {
-        let handle = self
-            .running
-            .get(&id)
-            .cloned()
-            .ok_or(HostError::NotFound {
-                entity: "running task",
-                id,
-            })?;
+        let handle = self.running.get(&id).cloned().ok_or(HostError::NotFound {
+            entity: "running task",
+            id,
+        })?;
         handle.pause().await;
         tasks::set_status(self.store.pool(), id, TaskStatus::Paused, now_ms()).await?;
         self.emit_changed(id).await;
@@ -762,7 +764,11 @@ impl Manager {
 
     async fn handle_report(&mut self, report: Report) {
         match report {
-            Report::Progress { id, progress, update } => {
+            Report::Progress {
+                id,
+                progress,
+                update,
+            } => {
                 let _ = tasks::set_progress(self.store.pool(), id, progress, now_ms()).await;
                 if let Some(batch) = self.progress.push(update, self.progress_clock()) {
                     self.sink.emit(batch);
@@ -773,15 +779,9 @@ impl Manager {
                 self.running.remove(&id);
                 let row = self.row(id).await.ok();
                 let total = row.as_ref().and_then(|row| row.total_bytes);
-                if tasks::mark_completed(
-                    self.store.pool(),
-                    id,
-                    total,
-                    sha256.as_deref(),
-                    now_ms(),
-                )
-                .await
-                .is_ok()
+                if tasks::mark_completed(self.store.pool(), id, total, sha256.as_deref(), now_ms())
+                    .await
+                    .is_ok()
                 {
                     self.record_history(id, Outcome::Completed).await;
                     self.emit_changed(id).await;
@@ -912,10 +912,7 @@ impl Manager {
     async fn row(&self, id: i64) -> Result<TaskRow, HostError> {
         tasks::get(self.store.pool(), id)
             .await?
-            .ok_or(HostError::NotFound {
-                entity: "task",
-                id,
-            })
+            .ok_or(HostError::NotFound { entity: "task", id })
     }
 
     async fn view(&self, id: i64) -> Result<TaskView, HostError> {

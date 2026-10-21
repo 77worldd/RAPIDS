@@ -158,7 +158,10 @@ async fn a_future_high_priority_retry_does_not_block_due_work() {
     let due_ids = |rows: Vec<rapids_host::store::TaskRow>| {
         rows.into_iter().map(|row| row.id).collect::<Vec<_>>()
     };
-    assert_eq!(due_ids(tasks::due(pool, now).await.expect("due now")), vec![low]);
+    assert_eq!(
+        due_ids(tasks::due(pool, now).await.expect("due now")),
+        vec![low]
+    );
     assert_eq!(
         due_ids(tasks::due(pool, due_at - 1).await.expect("before retry")),
         vec![low]

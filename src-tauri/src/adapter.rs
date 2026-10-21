@@ -32,7 +32,11 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     // Windows resolves this to %LOCALAPPDATA%\RAPIDS\rapids.db. The store
     // creates the directory, migrates, and checks integrity before a window
     // can issue a command; a damaged database makes startup fail visibly.
-    let database = app.path().local_data_dir()?.join("RAPIDS").join("rapids.db");
+    let database = app
+        .path()
+        .local_data_dir()?
+        .join("RAPIDS")
+        .join("rapids.db");
     let clock = Clock::at_offset_minutes(crate::platform::local_offset_minutes()?);
     let sink: Arc<dyn EventSink> = Arc::new(WebviewSink {
         app: app.handle().clone(),

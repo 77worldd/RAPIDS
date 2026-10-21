@@ -35,11 +35,8 @@ impl Harness {
         );
         let sink = Arc::new(RecordingSink::new());
         let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-        let (manager, join) = rapids_host::manager::spawn(
-            Arc::clone(&store),
-            sink_port,
-            Clock::utc(),
-        );
+        let (manager, join) =
+            rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
         Self {
             host: Host::new(Arc::clone(&store), manager.clone()),
             store,
@@ -124,11 +121,8 @@ impl Harness {
         );
         let sink = Arc::new(RecordingSink::new());
         let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-        let (manager, join) = rapids_host::manager::spawn(
-            Arc::clone(&store),
-            sink_port,
-            Clock::utc(),
-        );
+        let (manager, join) =
+            rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
         Self {
             host: Host::new(Arc::clone(&store), manager.clone()),
             store,
@@ -352,12 +346,15 @@ async fn a_schedule_is_created_listed_switched_off_and_removed() {
     let listed = harness.host.schedules_list().await.expect("list");
     assert!(!listed[0].enabled);
 
-    harness
-        .host
-        .schedule_delete(view.id)
-        .await
-        .expect("delete");
-    assert!(harness.host.schedules_list().await.expect("list").is_empty());
+    harness.host.schedule_delete(view.id).await.expect("delete");
+    assert!(
+        harness
+            .host
+            .schedules_list()
+            .await
+            .expect("list")
+            .is_empty()
+    );
 
     harness.finish().await;
 }
@@ -379,7 +376,14 @@ async fn a_schedule_without_a_name_is_refused() {
         .await
         .expect_err("no name");
     assert!(matches!(&error, HostError::Invalid { .. }));
-    assert!(harness.host.schedules_list().await.expect("list").is_empty());
+    assert!(
+        harness
+            .host
+            .schedules_list()
+            .await
+            .expect("list")
+            .is_empty()
+    );
 
     harness.finish().await;
 }
@@ -441,7 +445,9 @@ async fn progress_arrives_in_batches_and_the_last_sample_is_not_lost() {
         .collect();
     assert!(!batches.is_empty(), "progress was reported");
     assert!(
-        batches.iter().all(|ids| ids.iter().all(|id| *id == view.id)),
+        batches
+            .iter()
+            .all(|ids| ids.iter().all(|id| *id == view.id)),
         "every sample belongs to the task that ran"
     );
     assert!(
@@ -558,21 +564,33 @@ async fn app_wide_limits_round_trip_through_restart_and_change_live() {
     assert_eq!(settings.global_speed_limit, Some(512 * 1024));
 
     let harness = harness.restart().await;
-    let settings = harness.host.settings_get().await.expect("settings after restart");
+    let settings = harness
+        .host
+        .settings_get()
+        .await
+        .expect("settings after restart");
     assert_eq!(settings.max_connections_total, 1);
     assert_eq!(settings.global_speed_limit, Some(512 * 1024));
-    assert!(harness
-        .host
-        .settings_update("max_connections_total", &serde_json::json!(0))
-        .await
-        .is_err());
-    assert!(harness
-        .host
-        .settings_update("global_speed_limit", &serde_json::json!(0))
-        .await
-        .is_err());
+    assert!(
+        harness
+            .host
+            .settings_update("max_connections_total", &serde_json::json!(0))
+            .await
+            .is_err()
+    );
+    assert!(
+        harness
+            .host
+            .settings_update("global_speed_limit", &serde_json::json!(0))
+            .await
+            .is_err()
+    );
     assert_eq!(
-        harness.host.settings_get().await.expect("unchanged settings"),
+        harness
+            .host
+            .settings_get()
+            .await
+            .expect("unchanged settings"),
         settings
     );
 
@@ -586,7 +604,10 @@ async fn app_wide_limits_round_trip_through_restart_and_change_live() {
         .task_add(harness.request(&server.url("/second.bin")))
         .await
         .expect("second");
-    assert_eq!(harness.row(first.id).await.status_enum(), Some(TaskStatus::Downloading));
+    assert_eq!(
+        harness.row(first.id).await.status_enum(),
+        Some(TaskStatus::Downloading)
+    );
     assert_eq!(
         harness.row(second.id).await.status_enum(),
         Some(TaskStatus::Queued),
@@ -622,7 +643,12 @@ async fn app_wide_limits_round_trip_through_restart_and_change_live() {
         );
     }
     assert_eq!(
-        harness.host.settings_get().await.expect("latest budget").max_connections_total,
+        harness
+            .host
+            .settings_get()
+            .await
+            .expect("latest budget")
+            .max_connections_total,
         1
     );
     harness.finish().await;
@@ -703,7 +729,9 @@ async fn clearing_a_global_rate_releases_an_active_task_even_with_the_queue_paus
         .await
         .expect("add");
     harness
-        .wait_for(task.id, "throttled progress", |row| row.downloaded >= 64 * 1024)
+        .wait_for(task.id, "throttled progress", |row| {
+            row.downloaded >= 64 * 1024
+        })
         .await;
     harness.host.queue_pause().await.expect("pause queue only");
 
@@ -727,6 +755,12 @@ async fn clearing_a_global_rate_releases_an_active_task_even_with_the_queue_paus
         changed_at.elapsed() < Duration::from_secs(8),
         "an old 128 KiB/s limit would keep the remaining bytes waiting"
     );
-    assert!(harness.host.queue_paused().await.expect("queue still paused"));
+    assert!(
+        harness
+            .host
+            .queue_paused()
+            .await
+            .expect("queue still paused")
+    );
     harness.finish().await;
 }

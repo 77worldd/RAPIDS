@@ -416,10 +416,7 @@ pub async fn clear_failure(
     .await
     .map_err(|error| HostError::database("requeue task", error))?;
     if result.rows_affected() == 0 {
-        return Err(HostError::NotFound {
-            entity: "task",
-            id,
-        });
+        return Err(HostError::NotFound { entity: "task", id });
     }
     Ok(())
 }

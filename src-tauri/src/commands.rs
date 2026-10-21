@@ -44,7 +44,12 @@ pub async fn task_add(
     request: TaskAddInput,
 ) -> Result<TaskView, String> {
     let fallback_dir = if request.needs_default_dir() {
-        let configured = state.host.settings_get().await.map_err(message)?.default_dest_dir;
+        let configured = state
+            .host
+            .settings_get()
+            .await
+            .map_err(message)?
+            .default_dest_dir;
         Some(if configured.trim().is_empty() {
             app.path().download_dir().map_err(message)?
         } else {
@@ -83,7 +88,11 @@ pub async fn task_delete(
     id: i64,
     remove_file: bool,
 ) -> Result<(), String> {
-    state.host.task_delete(id, remove_file).await.map_err(message)
+    state
+        .host
+        .task_delete(id, remove_file)
+        .await
+        .map_err(message)
 }
 
 #[tauri::command]
@@ -121,7 +130,11 @@ pub async fn settings_update(
     name: String,
     value: serde_json::Value,
 ) -> Result<Settings, String> {
-    state.host.settings_update(&name, &value).await.map_err(message)
+    state
+        .host
+        .settings_update(&name, &value)
+        .await
+        .map_err(message)
 }
 
 #[tauri::command]
@@ -134,7 +147,11 @@ pub async fn schedule_create(
     state: State<'_, AdapterState>,
     input: ScheduleCreateInput,
 ) -> Result<ScheduleView, String> {
-    state.host.schedule_create(input.into_input().map_err(message)?).await.map_err(message)
+    state
+        .host
+        .schedule_create(input.into_input().map_err(message)?)
+        .await
+        .map_err(message)
 }
 
 #[tauri::command]
@@ -143,7 +160,11 @@ pub async fn schedule_set_enabled(
     id: i64,
     enabled: bool,
 ) -> Result<(), String> {
-    state.host.schedule_set_enabled(id, enabled).await.map_err(message)
+    state
+        .host
+        .schedule_set_enabled(id, enabled)
+        .await
+        .map_err(message)
 }
 
 #[tauri::command]

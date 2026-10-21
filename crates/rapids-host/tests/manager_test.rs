@@ -4,9 +4,7 @@ use std::time::{Duration, Instant};
 
 use rapids_engine::{Manifest, Workspace};
 use rapids_host::events::{EventSink, HostEvent, RecordingSink};
-use rapids_host::store::{
-    Store, TaskCategory, TaskRow, TaskStatus, history, settings, tasks,
-};
+use rapids_host::store::{Store, TaskCategory, TaskRow, TaskStatus, history, settings, tasks};
 use rapids_host::{AddRequest, Clock, HostError, ManagerHandle, now_ms};
 use rapids_test_support::{TestServer, expected_sha256, options};
 use tokio::task::JoinHandle;
@@ -170,7 +168,9 @@ async fn a_paused_task_stops_and_a_resumed_one_finishes() {
         .expect("add");
 
     harness
-        .wait_for(view.id, "progress before pause", |row| row.downloaded > 64 * 1024)
+        .wait_for(view.id, "progress before pause", |row| {
+            row.downloaded > 64 * 1024
+        })
         .await;
 
     harness.manager.pause(view.id).await.expect("pause");
@@ -423,8 +423,7 @@ async fn interrupted_rows_return_to_the_queue_on_startup() {
 
     let sink = Arc::new(RecordingSink::new());
     let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-    let (manager, join) =
-        rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
+    let (manager, join) = rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
 
     // The interrupted row is back in the queue, waiting behind the task that
     // took the single slot; nothing about it was resumed from the database.
@@ -514,7 +513,10 @@ async fn shutdown_unlocks_a_running_download_and_restarts_from_its_sidecar() {
     // This is still the same process. The manager's acknowledgement must
     // mean the engine has released the workspace, not merely paused it.
     let mut claimant = Workspace::for_dest(&dest);
-    claimant.create_and_lock().await.expect("workspace unlocked");
+    claimant
+        .create_and_lock()
+        .await
+        .expect("workspace unlocked");
     drop(claimant);
     drop(manager);
     Arc::try_unwrap(store)
@@ -522,7 +524,10 @@ async fn shutdown_unlocks_a_running_download_and_restarts_from_its_sidecar() {
         .close()
         .await;
 
-    assert!(server.wait_idle(Duration::from_secs(10)), "old requests settled");
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "old requests settled"
+    );
     server.clear_requests();
     let store = Arc::new(
         Store::open(&_dir.path().join("rapids.db"))
@@ -563,7 +568,10 @@ async fn shutdown_unlocks_a_running_download_and_restarts_from_its_sidecar() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].outcome, "completed");
     assert_eq!(entries[0].task_id, view.id);
-    assert!(server.wait_idle(Duration::from_secs(10)), "resumed requests settled");
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "resumed requests settled"
+    );
     let refetched: u64 = server
         .requests()
         .iter()
@@ -683,11 +691,17 @@ async fn ten_queued_downloads_survive_a_store_and_manager_restart() {
 
     let expected = expected_sha256(total);
     for (id, file_name, _) in &inserted {
-        let row = finished.iter().find(|row| row.id == *id).expect("saved task");
+        let row = finished
+            .iter()
+            .find(|row| row.id == *id)
+            .expect("saved task");
         assert_eq!(row.observed_sha256.as_deref(), Some(expected.as_str()));
         assert_eq!(row.downloaded, total as i64);
         let file = downloads.join(file_name);
-        assert_eq!(rapids_engine::sha256_file(&file).expect("file hash"), expected);
+        assert_eq!(
+            rapids_engine::sha256_file(&file).expect("file hash"),
+            expected
+        );
     }
     // Completion is written before its history entry within one manager turn.
     // A command reply is the barrier that tells us the last turn has finished.
