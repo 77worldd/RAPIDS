@@ -88,22 +88,22 @@ pub async fn get_bool(pool: &SqlitePool, key: &str, fallback: bool) -> Result<bo
 }
 
 /// Reads a JSON string setting (stored quoted), or `fallback` when absent.
+/// Parsing goes through a real JSON reader so escapes (\", \\, \n, \uXXXX)
+/// survive the round trip instead of coming back as literal text.
 pub async fn get_string(pool: &SqlitePool, key: &str, fallback: &str) -> Result<String, HostError> {
     match get(pool, key).await? {
         None => Ok(fallback.to_string()),
-        Some(value) => {
-            let trimmed = value.trim();
-            let unquoted = trimmed
-                .strip_prefix('"')
-                .and_then(|rest| rest.strip_suffix('"'))
-                .ok_or_else(|| HostError::invalid(format!("{key} is not a string: {value}")))?;
-            Ok(unquoted.to_string())
-        }
+        Some(value) => match serde_json::from_str::<serde_json::Value>(value.trim()) {
+            Ok(serde_json::Value::String(text)) => Ok(text),
+            _ => Err(HostError::invalid(format!(
+                "{key} is not a JSON string: {value}"
+            ))),
+        },
     }
 }
 
-/// Encodes a string the way [`get_string`] expects to read it back.
+/// Encodes a string the way [`get_string`] expects to read it back: a JSON
+/// string literal, escapes included.
 pub fn encode_string(value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{escaped}\"")
+    serde_json::to_string(value).expect("a string always serializes to JSON")
 }

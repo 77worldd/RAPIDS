@@ -330,15 +330,37 @@ async fn settings_round_trip_with_types() {
             .expect("read")
     );
 
-    let folder = "/downloads/movies \"new\"";
-    settings::set(pool, settings::DEFAULT_DEST_DIR, &settings::encode_string(folder), now)
+    // Every escape a path can contain has to survive the round trip: quotes,
+    // backslashes, newlines, and non-ASCII text.
+    for folder in [
+        "/downloads/movies \"new\"",
+        "C:\\Users\\rapids\\Downloads",
+        "/downloads/line\nbreak",
+        "/downloads/€uro/文件",
+        "",
+    ] {
+        settings::set(pool, settings::DEFAULT_DEST_DIR, &settings::encode_string(folder), now)
+            .await
+            .expect("write");
+        assert_eq!(
+            settings::get_string(pool, settings::DEFAULT_DEST_DIR, "/fallback")
+                .await
+                .expect("read"),
+            folder,
+            "stored text must come back unchanged"
+        );
+    }
+
+    // A stored number is not a string; reading it as one reports the type
+    // mismatch instead of returning the digits.
+    settings::set(pool, settings::DEFAULT_DEST_DIR, "42", now)
         .await
         .expect("write");
-    assert_eq!(
+    assert!(
         settings::get_string(pool, settings::DEFAULT_DEST_DIR, "")
             .await
-            .expect("read"),
-        folder
+            .is_err(),
+        "a number is not a string setting"
     );
 
     let malformed = settings::set(pool, settings::MAX_PARALLEL, "not a number", now).await;
