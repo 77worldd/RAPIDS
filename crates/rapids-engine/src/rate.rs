@@ -298,6 +298,8 @@ mod tests {
             .acquire_while(1024 * 1024, || asked.fetch_add(1, Ordering::Relaxed) < 2)
             .await;
         assert!(!finished, "the callback asked to stop");
-        assert_eq!(asked.load(Ordering::Relaxed), 2);
+        // fetch_add reports the previous count: the callback answers continue
+        // twice, and the third call is the one that says stop.
+        assert_eq!(asked.load(Ordering::Relaxed), 3);
     }
 }
