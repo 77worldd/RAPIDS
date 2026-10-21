@@ -2,7 +2,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use rapids_engine::{Manifest, Workspace};
-use rapids_test_support::{expected_sha256, options, TestServer};
+use rapids_test_support::{TestServer, expected_sha256, options};
 
 /// Bytes the engine has confirmed for the stored segments. The part file is
 /// preallocated to the full size on purpose, so its length says nothing about

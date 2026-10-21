@@ -339,9 +339,14 @@ async fn settings_round_trip_with_types() {
         "/downloads/€uro/文件",
         "",
     ] {
-        settings::set(pool, settings::DEFAULT_DEST_DIR, &settings::encode_string(folder), now)
-            .await
-            .expect("write");
+        settings::set(
+            pool,
+            settings::DEFAULT_DEST_DIR,
+            &settings::encode_string(folder),
+            now,
+        )
+        .await
+        .expect("write");
         assert_eq!(
             settings::get_string(pool, settings::DEFAULT_DEST_DIR, "/fallback")
                 .await
@@ -366,7 +371,9 @@ async fn settings_round_trip_with_types() {
     let malformed = settings::set(pool, settings::MAX_PARALLEL, "not a number", now).await;
     assert!(malformed.is_ok(), "writing text is allowed");
     assert!(
-        settings::get_i64(pool, settings::MAX_PARALLEL, 3).await.is_err(),
+        settings::get_i64(pool, settings::MAX_PARALLEL, 3)
+            .await
+            .is_err(),
         "reading it back as a number reports the problem instead of guessing"
     );
 

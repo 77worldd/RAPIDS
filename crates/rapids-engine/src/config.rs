@@ -77,9 +77,7 @@ impl EngineConfig {
     /// Repairs out-of-range values instead of failing the task for a typo.
     pub fn validated(mut self) -> Result<Self, EngineError> {
         if self.start_connections == 0 {
-            return Err(EngineError::invalid_spec(
-                "connections must be at least 1",
-            ));
+            return Err(EngineError::invalid_spec("connections must be at least 1"));
         }
         if self.max_connections < self.start_connections {
             self.max_connections = self.start_connections;

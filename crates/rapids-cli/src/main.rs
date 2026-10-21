@@ -9,7 +9,7 @@ use clap::Parser;
 use tokio::sync::Notify;
 
 use rapids_engine::{
-    spawn_download, DownloadSpec, DownloadState, EngineConfig, EngineEvent, Workspace,
+    DownloadSpec, DownloadState, EngineConfig, EngineEvent, Workspace, spawn_download,
 };
 
 #[tokio::main]

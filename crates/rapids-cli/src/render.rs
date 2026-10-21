@@ -1,7 +1,7 @@
 use std::io::{IsTerminal, Write};
 
-use rapids_engine::util::{human_bytes, human_duration};
 use rapids_engine::EngineEvent;
+use rapids_engine::util::{human_bytes, human_duration};
 
 /// Terminal presentation for the event stream: one live progress line when
 /// attached to a terminal, plain lines for everything else.

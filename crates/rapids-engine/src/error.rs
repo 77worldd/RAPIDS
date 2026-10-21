@@ -145,11 +145,9 @@ impl fmt::Display for EngineError {
                 "{} already exists; pass --overwrite to replace it",
                 path.display()
             ),
-            Self::WorkspaceLocked { path } => write!(
-                f,
-                "another RAPIDS process is working on {}",
-                path.display()
-            ),
+            Self::WorkspaceLocked { path } => {
+                write!(f, "another RAPIDS process is working on {}", path.display())
+            }
             Self::Io {
                 operation,
                 path,
@@ -180,10 +178,12 @@ mod tests {
     fn transient_network_failures_are_retryable() {
         assert!(EngineError::network("server probe", "connection reset", 5).is_retryable());
         assert!(EngineError::timeout("server probe", "no headers", 5).is_retryable());
-        assert!(EngineError::WorkspaceLocked {
-            path: PathBuf::from("file.bin.rapids")
-        }
-        .is_retryable());
+        assert!(
+            EngineError::WorkspaceLocked {
+                path: PathBuf::from("file.bin.rapids")
+            }
+            .is_retryable()
+        );
     }
 
     #[test]

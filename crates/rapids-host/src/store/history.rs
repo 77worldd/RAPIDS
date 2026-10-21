@@ -103,13 +103,11 @@ pub async fn recent(pool: &SqlitePool, limit: i64) -> Result<Vec<HistoryRow>, Ho
     if limit <= 0 {
         return Err(HostError::invalid("history limit must be positive"));
     }
-    sqlx::query_as::<_, HistoryRow>(
-        "SELECT * FROM history ORDER BY ended_at DESC, id DESC LIMIT ?",
-    )
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| HostError::database("read history", error))
+    sqlx::query_as::<_, HistoryRow>("SELECT * FROM history ORDER BY ended_at DESC, id DESC LIMIT ?")
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| HostError::database("read history", error))
 }
 
 pub async fn count(pool: &SqlitePool) -> Result<i64, HostError> {

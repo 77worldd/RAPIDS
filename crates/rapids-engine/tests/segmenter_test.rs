@@ -1,4 +1,4 @@
-use rapids_engine::{scaling_decision, tile, ScaleDecision};
+use rapids_engine::{ScaleDecision, scaling_decision, tile};
 
 fn assert_exact_cover(total: u64, min_segment_bytes: u64, max_segments: u32) {
     let segments = tile(total, min_segment_bytes, max_segments);

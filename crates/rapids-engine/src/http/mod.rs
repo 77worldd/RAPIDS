@@ -3,8 +3,8 @@ pub(crate) mod probe;
 
 use std::time::Duration;
 
-use reqwest::header::HeaderName;
 use reqwest::Response;
+use reqwest::header::HeaderName;
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;

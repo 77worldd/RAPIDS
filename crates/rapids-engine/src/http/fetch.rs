@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use reqwest::header::{IF_RANGE, RANGE};
 use reqwest::Response;
+use reqwest::header::{IF_RANGE, RANGE};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 
@@ -47,7 +47,9 @@ pub(crate) fn apply_control(sender: &watch::Sender<Control>, update: impl FnOnce
 pub(crate) enum CoordMsg {
     Started,
     Done,
-    Failed { error: EngineError },
+    Failed {
+        error: EngineError,
+    },
     Retrying {
         segment: u32,
         attempt: u32,
@@ -266,20 +268,12 @@ async fn attempt_segment(
         .open(&context.part_path)
         .await
         .map_err(|error| {
-            AttemptFailure::Fatal(EngineError::io(
-                "open part file",
-                &context.part_path,
-                error,
-            ))
+            AttemptFailure::Fatal(EngineError::io("open part file", &context.part_path, error))
         })?;
     file.seek(std::io::SeekFrom::Start(start_offset))
         .await
         .map_err(|error| {
-            AttemptFailure::Fatal(EngineError::io(
-                "seek part file",
-                &context.part_path,
-                error,
-            ))
+            AttemptFailure::Fatal(EngineError::io("seek part file", &context.part_path, error))
         })?;
 
     let mut request = context.client.get(&context.final_url);
@@ -297,13 +291,9 @@ async fn attempt_segment(
         Err(_) => {
             return Err(AttemptFailure::Retry(
                 "response headers exceeded the header timeout".to_string(),
-            ))
+            ));
         }
-        Ok(Err(error)) => {
-            return Err(AttemptFailure::Retry(format!(
-                "connection failed: {error}"
-            )))
-        }
+        Ok(Err(error)) => return Err(AttemptFailure::Retry(format!("connection failed: {error}"))),
         Ok(Ok(response)) => response,
     };
 
@@ -325,12 +315,12 @@ async fn attempt_segment(
                     Some(_) => {
                         return Err(AttemptFailure::Fatal(EngineError::protocol(format!(
                             "server returned a different range than requested ({value})"
-                        ))))
+                        ))));
                     }
                     None => {
                         return Err(AttemptFailure::Fatal(EngineError::protocol(
                             "206 response without a parseable Content-Range",
-                        )))
+                        )));
                     }
                 }
             } else {
@@ -343,7 +333,7 @@ async fn attempt_segment(
         408 | 429 | 500..=599 => {
             return Err(AttemptFailure::Retry(format!(
                 "server responded with HTTP {status}"
-            )))
+            )));
         }
         416 if ranged => {
             return Err(AttemptFailure::Fatal(EngineError::SizeChanged));
@@ -352,7 +342,7 @@ async fn attempt_segment(
             return Err(AttemptFailure::Fatal(EngineError::HttpStatus {
                 status,
                 url: context.final_url.clone(),
-            }))
+            }));
         }
     }
 
@@ -408,12 +398,12 @@ async fn pump_body(
             Some(Err(_elapsed)) => {
                 return Err(AttemptFailure::Retry(
                     "no data received before the read timeout".to_string(),
-                ))
+                ));
             }
             Some(Ok(Err(error))) => {
                 return Err(AttemptFailure::Retry(format!(
                     "connection dropped during transfer: {error}"
-                )))
+                )));
             }
             Some(Ok(Ok(None))) => break,
             Some(Ok(Ok(Some(bytes)))) => {

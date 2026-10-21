@@ -263,10 +263,7 @@ pub async fn set_status(
         .await
         .map_err(|error| HostError::database("update task status", error))?;
     if result.rows_affected() == 0 {
-        return Err(HostError::NotFound {
-            entity: "task",
-            id,
-        });
+        return Err(HostError::NotFound { entity: "task", id });
     }
     Ok(())
 }
@@ -286,10 +283,7 @@ pub async fn mark_started(pool: &SqlitePool, id: i64, now: i64) -> Result<(), Ho
     .await
     .map_err(|error| HostError::database("start task", error))?;
     if result.rows_affected() == 0 {
-        return Err(HostError::NotFound {
-            entity: "task",
-            id,
-        });
+        return Err(HostError::NotFound { entity: "task", id });
     }
     Ok(())
 }
@@ -321,10 +315,7 @@ pub async fn mark_completed(
     .await
     .map_err(|error| HostError::database("complete task", error))?;
     if result.rows_affected() == 0 {
-        return Err(HostError::NotFound {
-            entity: "task",
-            id,
-        });
+        return Err(HostError::NotFound { entity: "task", id });
     }
     Ok(())
 }
@@ -377,10 +368,7 @@ pub async fn set_failure(
     .await
     .map_err(|error| HostError::database("record failure", error))?;
     if result.rows_affected() == 0 {
-        return Err(HostError::NotFound {
-            entity: "task",
-            id,
-        });
+        return Err(HostError::NotFound { entity: "task", id });
     }
     Ok(())
 }
@@ -401,10 +389,7 @@ pub async fn set_priority(
         .await
         .map_err(|error| HostError::database("update priority", error))?;
     if result.rows_affected() == 0 {
-        return Err(HostError::NotFound {
-            entity: "task",
-            id,
-        });
+        return Err(HostError::NotFound { entity: "task", id });
     }
     Ok(())
 }

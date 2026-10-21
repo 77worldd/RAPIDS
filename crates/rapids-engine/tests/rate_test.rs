@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rapids_engine::{
-    spawn_download, sha256_file, DownloadSpec, EngineConfig, EngineEvent, RateLimiter,
+    DownloadSpec, EngineConfig, EngineEvent, RateLimiter, sha256_file, spawn_download,
 };
-use rapids_test_support::{expected_sha256, options, TestServer};
+use rapids_test_support::{TestServer, expected_sha256, options};
 
 fn spec_for(url: &str, dest: &Path, connections: u8) -> DownloadSpec {
     DownloadSpec {
@@ -136,5 +136,8 @@ async fn a_throttled_download_still_stops_on_pause() {
     );
 
     handle.cancel().await;
-    assert!(!dest.exists(), "a cancelled download never publishes a file");
+    assert!(
+        !dest.exists(),
+        "a cancelled download never publishes a file"
+    );
 }

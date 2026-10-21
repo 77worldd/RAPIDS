@@ -1,10 +1,8 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rapids_engine::{
-    spawn_download, DownloadSpec, EngineConfig, EngineEvent, Manifest, Workspace,
-};
-use rapids_test_support::{expected_sha256, options, TestServer};
+use rapids_engine::{DownloadSpec, EngineConfig, EngineEvent, Manifest, Workspace, spawn_download};
+use rapids_test_support::{TestServer, expected_sha256, options};
 
 async fn next_event(
     rx: &mut tokio::sync::mpsc::Receiver<EngineEvent>,
@@ -58,8 +56,7 @@ async fn completes_a_segmented_download_and_verifies_sha() {
 
     let mut spec = spec_for(&server.url("/payload.bin"), &dest);
     spec.expected_sha256 = Some(expected.clone());
-    let (handle, mut rx) =
-        spawn_download(spec, EngineConfig::default()).expect("spawn");
+    let (handle, mut rx) = spawn_download(spec, EngineConfig::default()).expect("spawn");
 
     let mut saw_progress = false;
     let completed = wait_for(&mut rx, 30, "completion", |event| {
@@ -155,7 +152,10 @@ async fn flaky_connections_recover_through_retries() {
     drop(handle);
 
     assert!(saw_retry, "dropped connections must surface as retries");
-    assert_eq!(rapids_engine::sha256_file(&dest).expect("hash"), expected_sha256(total));
+    assert_eq!(
+        rapids_engine::sha256_file(&dest).expect("hash"),
+        expected_sha256(total)
+    );
 }
 
 #[tokio::test]
@@ -236,7 +236,10 @@ async fn cancel_discards_the_workspace() {
     .await;
     drop(handle);
 
-    assert!(!Workspace::for_dest(&dest).dir.exists(), "workspace removed");
+    assert!(
+        !Workspace::for_dest(&dest).dir.exists(),
+        "workspace removed"
+    );
     assert!(!dest.exists(), "no final file after cancel");
 }
 
@@ -381,14 +384,23 @@ async fn mismatched_expected_sha_reports_both_hashes() {
     match failure {
         EngineEvent::Failed { message } => {
             assert!(message.contains("SHA-256 verification failed"));
-            assert!(message.contains(&wrong), "message must show the expectation");
-            assert!(message.contains(&actual), "message must show what was computed");
+            assert!(
+                message.contains(&wrong),
+                "message must show the expectation"
+            );
+            assert!(
+                message.contains(&actual),
+                "message must show what was computed"
+            );
         }
         other => panic!("expected verification failure, got {other}"),
     }
 
     let workspace = Workspace::for_dest(&dest);
-    assert!(workspace.part_path.exists(), "bytes are kept for inspection");
+    assert!(
+        workspace.part_path.exists(),
+        "bytes are kept for inspection"
+    );
     let manifest = Manifest::load(&workspace.dir)
         .await
         .expect("manifest present");

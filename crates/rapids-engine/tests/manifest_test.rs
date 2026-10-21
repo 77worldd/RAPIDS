@@ -56,10 +56,7 @@ async fn missing_or_unreadable_manifest_yields_none() {
 
     let mut future_version = sample_manifest();
     future_version.v = 99;
-    future_version
-        .save_atomic(dir.path())
-        .await
-        .expect("save");
+    future_version.save_atomic(dir.path()).await.expect("save");
     assert!(Manifest::load(dir.path()).await.is_none());
 }
 
@@ -99,11 +96,7 @@ fn resume_requires_matching_validator_and_size() {
     // the fresh probe must re-present it. A matching Last-Modified cannot
     // clear the gate once the fresh response drops the ETag, because the
     // validators are no longer comparable — the gate wipes and restarts.
-    assert!(!stored.can_resume(
-        Some(100),
-        None,
-        Some("Wed, 21 Oct 2026 07:28:00 GMT")
-    ));
+    assert!(!stored.can_resume(Some(100), None, Some("Wed, 21 Oct 2026 07:28:00 GMT")));
 
     assert!(!stored.can_resume(Some(101), Some("\"v1\""), None));
     assert!(!stored.can_resume(Some(100), Some("\"v2\""), None));
@@ -112,11 +105,7 @@ fn resume_requires_matching_validator_and_size() {
 
     let mut no_etag = sample_manifest();
     no_etag.etag = None;
-    assert!(no_etag.can_resume(
-        Some(100),
-        None,
-        Some("Wed, 21 Oct 2026 07:28:00 GMT")
-    ));
+    assert!(no_etag.can_resume(Some(100), None, Some("Wed, 21 Oct 2026 07:28:00 GMT")));
     assert!(!no_etag.can_resume(Some(100), None, Some("different date")));
 
     let mut no_validators = sample_manifest();

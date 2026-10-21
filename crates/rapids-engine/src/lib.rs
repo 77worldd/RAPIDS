@@ -22,11 +22,11 @@ pub mod util;
 pub mod workspace;
 
 pub use config::EngineConfig;
-pub use coordinator::{spawn_download, DownloadHandle, DownloadSpec};
+pub use coordinator::{DownloadHandle, DownloadSpec, spawn_download};
 pub use error::EngineError;
 pub use events::{DownloadState, EngineEvent};
 pub use hash::{sha256_file, sha256_hex};
 pub use manifest::{Manifest, SegmentState};
 pub use rate::{RateLimiter, RateLimits};
-pub use segmenter::{scaling_decision, tile, ScaleDecision, Segment};
+pub use segmenter::{ScaleDecision, Segment, scaling_decision, tile};
 pub use workspace::Workspace;

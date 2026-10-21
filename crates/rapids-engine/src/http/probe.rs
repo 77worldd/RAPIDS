@@ -1,8 +1,8 @@
+use reqwest::Response;
 use reqwest::header::{
     ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG,
     LAST_MODIFIED, RANGE,
 };
-use reqwest::Response;
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
@@ -80,23 +80,22 @@ async fn probe_once(
     };
 
     // --- HEAD: cheap metadata when the server allows it -----------------
-    let head_response = match tokio::time::timeout(config.header_timeout, client.head(url).send())
-        .await
-    {
-        Err(_) => {
-            return Err(ProbeFailure::Retry {
-                reason: "HEAD request exceeded the header timeout".to_string(),
-                timed_out: true,
-            })
-        }
-        Ok(Err(error)) => {
-            return Err(ProbeFailure::Retry {
-                reason: format!("HEAD connection failed: {error}"),
-                timed_out: false,
-            })
-        }
-        Ok(Ok(response)) => response,
-    };
+    let head_response =
+        match tokio::time::timeout(config.header_timeout, client.head(url).send()).await {
+            Err(_) => {
+                return Err(ProbeFailure::Retry {
+                    reason: "HEAD request exceeded the header timeout".to_string(),
+                    timed_out: true,
+                });
+            }
+            Ok(Err(error)) => {
+                return Err(ProbeFailure::Retry {
+                    reason: format!("HEAD connection failed: {error}"),
+                    timed_out: false,
+                });
+            }
+            Ok(Ok(response)) => response,
+        };
     let head_status = head_response.status().as_u16();
     let (head_saw_ranges, need_get) = match head_status {
         200..=299 => {
@@ -118,13 +117,13 @@ async fn probe_once(
             return Err(ProbeFailure::Retry {
                 reason: format!("HEAD returned HTTP {head_status}"),
                 timed_out: false,
-            })
+            });
         }
         _ => {
             return Err(ProbeFailure::Fatal(EngineError::HttpStatus {
                 status: head_status,
                 url: url.to_string(),
-            }))
+            }));
         }
     };
     drop(head_response);
@@ -141,13 +140,13 @@ async fn probe_once(
                 return Err(ProbeFailure::Retry {
                     reason: "GET probe exceeded the header timeout".to_string(),
                     timed_out: true,
-                })
+                });
             }
             Ok(Err(error)) => {
                 return Err(ProbeFailure::Retry {
                     reason: format!("GET probe connection failed: {error}"),
                     timed_out: false,
-                })
+                });
             }
             Ok(Ok(response)) => response,
         };
@@ -198,7 +197,7 @@ async fn probe_once(
                     _ => {
                         return Err(ProbeFailure::Fatal(EngineError::protocol(
                             "range probe was rejected with an unexpected Content-Range",
-                        )))
+                        )));
                     }
                 }
             }
@@ -206,13 +205,13 @@ async fn probe_once(
                 return Err(ProbeFailure::Retry {
                     reason: format!("GET probe returned HTTP {status}"),
                     timed_out: false,
-                })
+                });
             }
             _ => {
                 return Err(ProbeFailure::Fatal(EngineError::HttpStatus {
                     status,
                     url: url.to_string(),
-                }))
+                }));
             }
         }
         drop(response);
@@ -270,7 +269,9 @@ pub(crate) fn filename_from_content_disposition(value: &str) -> Option<String> {
         let raw = raw.trim().trim_matches('"');
         if key == "filename" {
             plain = Some(raw.to_string());
-        } else if key == "filename*" && let Some(encoded) = raw.strip_prefix("UTF-8''") {
+        } else if key == "filename*"
+            && let Some(encoded) = raw.strip_prefix("UTF-8''")
+        {
             extended = Some(percent_decode(encoded));
         }
     }
@@ -281,7 +282,9 @@ pub(crate) fn filename_from_content_disposition(value: &str) -> Option<String> {
 /// Falls back to the last meaningful path segment of the URL.
 pub(crate) fn filename_from_url(url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
-    let segment = parsed.path_segments()?.rfind(|segment| !segment.is_empty())?;
+    let segment = parsed
+        .path_segments()?
+        .rfind(|segment| !segment.is_empty())?;
     let decoded = percent_decode(segment);
     sanitize_filename(&decoded)
 }
@@ -375,7 +378,8 @@ mod tests {
             Some("€.txt")
         );
         assert_eq!(
-            filename_from_content_disposition(r#"attachment; filename="../../evil.exe""#).as_deref(),
+            filename_from_content_disposition(r#"attachment; filename="../../evil.exe""#)
+                .as_deref(),
             Some("evil.exe")
         );
         assert_eq!(

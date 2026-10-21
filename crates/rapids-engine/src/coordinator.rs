@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, watch};
@@ -11,12 +11,12 @@ use crate::config::EngineConfig;
 use crate::error::EngineError;
 use crate::events::{DownloadState, EngineEvent};
 use crate::http::fetch::{
-    apply_control, worker_loop, Control, CoordMsg, DownloadContext, WorkQueue,
+    Control, CoordMsg, DownloadContext, WorkQueue, apply_control, worker_loop,
 };
 use crate::http::{build_client, probe};
-use crate::manifest::{unix_timestamp, Manifest, SegmentState};
+use crate::manifest::{Manifest, SegmentState, unix_timestamp};
 use crate::rate::RateLimits;
-use crate::segmenter::{scaling_decision, tile, ScaleDecision, Segment};
+use crate::segmenter::{ScaleDecision, Segment, scaling_decision, tile};
 use crate::workspace::Workspace;
 
 /// Everything needed to start one download.
@@ -123,9 +123,7 @@ pub fn spawn_download(
             )));
         }
         if dest.exists() && !spec.overwrite {
-            return Err(EngineError::DestinationExists {
-                path: dest.clone(),
-            });
+            return Err(EngineError::DestinationExists { path: dest.clone() });
         }
     }
 
@@ -190,7 +188,10 @@ struct Coordinator {
 impl Coordinator {
     async fn transition(&self, state: DownloadState) {
         self.state_tx.send_replace(state);
-        let _ = self.event_tx.send(EngineEvent::StateChanged { state }).await;
+        let _ = self
+            .event_tx
+            .send(EngineEvent::StateChanged { state })
+            .await;
     }
 
     async fn emit(&self, event: EngineEvent) {
@@ -339,7 +340,7 @@ impl Coordinator {
                     operation: "sync part file",
                     path: workspace.part_path.clone(),
                     reason: error.to_string(),
-                })
+                });
             }
         }
 
@@ -353,7 +354,7 @@ impl Coordinator {
                     operation: "hash part file",
                     path: workspace.part_path.clone(),
                     reason: error.to_string(),
-                })
+                });
             }
         };
         manifest.observed_sha256 = Some(observed.clone());
@@ -495,10 +496,8 @@ impl Coordinator {
                 return None;
             }
             if dest.exists() && !self.spec.overwrite {
-                self.fail(EngineError::DestinationExists {
-                    path: dest.clone(),
-                })
-                .await;
+                self.fail(EngineError::DestinationExists { path: dest.clone() })
+                    .await;
                 return None;
             }
             if let Err(error) = ensure_destination_parent(&dest).await {
@@ -597,8 +596,10 @@ impl Coordinator {
             }
         };
 
-        let limits =
-            RateLimits::compose(self.config.shared_limiter.clone(), self.config.rate_limit_bps);
+        let limits = RateLimits::compose(
+            self.config.shared_limiter.clone(),
+            self.config.rate_limit_bps,
+        );
         let context = Arc::new(DownloadContext {
             client,
             config: self.config.clone(),
@@ -649,8 +650,9 @@ impl Coordinator {
                 return;
             }
             if flags.paused {
-                if let Err(error) =
-                    self.checkpoint(&workspace.dir, &mut manifest, &progress).await
+                if let Err(error) = self
+                    .checkpoint(&workspace.dir, &mut manifest, &progress)
+                    .await
                 {
                     self.fail(error).await;
                     return;
@@ -663,7 +665,8 @@ impl Coordinator {
                         break;
                     }
                     if pause_wake.changed().await.is_err() {
-                        self.fail(EngineError::protocol("control channel closed")).await;
+                        self.fail(EngineError::protocol("control channel closed"))
+                            .await;
                         return;
                     }
                 }
@@ -755,8 +758,11 @@ impl Coordinator {
                             .iter()
                             .map(|atomic| atomic.load(Ordering::Acquire))
                             .sum();
-                        let interval_secs =
-                            self.config.progress_interval.as_secs_f64().max(f64::EPSILON);
+                        let interval_secs = self
+                            .config
+                            .progress_interval
+                            .as_secs_f64()
+                            .max(f64::EPSILON);
                         let instantaneous =
                             downloaded.saturating_sub(last_progress_bytes) as f64 / interval_secs;
                         let speed = if have_speed_sample {
@@ -770,9 +776,7 @@ impl Coordinator {
                         let speed_bps = speed as u64;
                         let eta_secs = match (manifest.total_bytes, speed_bps) {
                             (Some(total), _) if downloaded >= total => Some(0u64),
-                            (Some(total), speed) if speed > 0 => {
-                                Some((total - downloaded) / speed)
-                            }
+                            (Some(total), speed) if speed > 0 => Some((total - downloaded) / speed),
                             _ => None,
                         };
                         let _ = self.event_tx.try_send(EngineEvent::Progress {
@@ -787,8 +791,9 @@ impl Coordinator {
                         if downloaded.saturating_sub(last_checkpoint_bytes)
                             >= self.config.checkpoint_bytes
                         {
-                            if let Err(error) =
-                                self.checkpoint(&workspace.dir, &mut manifest, &progress).await
+                            if let Err(error) = self
+                                .checkpoint(&workspace.dir, &mut manifest, &progress)
+                                .await
                             {
                                 failure = Some(error);
                                 apply_control(&self.control, |flags| flags.aborted = true);
@@ -808,9 +813,7 @@ impl Coordinator {
                             .sum();
                         let window = self.config.scale_window.as_secs_f64().max(f64::EPSILON);
                         let current_bps = match last_window_sum {
-                            Some(previous) => {
-                                (sum.saturating_sub(previous)) as f64 / window
-                            }
+                            Some(previous) => (sum.saturating_sub(previous)) as f64 / window,
                             None => 0.0,
                         };
                         last_window_sum = Some(sum);
@@ -845,8 +848,9 @@ impl Coordinator {
                         last_window_bps = Some(current_bps);
                     }
                     IoTurn::Checkpoint => {
-                        if let Err(error) =
-                            self.checkpoint(&workspace.dir, &mut manifest, &progress).await
+                        if let Err(error) = self
+                            .checkpoint(&workspace.dir, &mut manifest, &progress)
+                            .await
                         {
                             failure = Some(error);
                             apply_control(&self.control, |flags| flags.aborted = true);
@@ -900,12 +904,14 @@ impl Coordinator {
             // the outer loop below), a failure landed in `failure`, or a
             // control flag made the session `continue`/`return` directly.
             if let Some(error) = failure {
-                let _ = self.checkpoint(&workspace.dir, &mut manifest, &progress).await;
+                let _ = self
+                    .checkpoint(&workspace.dir, &mut manifest, &progress)
+                    .await;
                 self.fail(error).await;
                 return;
             }
             break 'run;
-        };
+        }
 
         match self.finalize(&mut workspace, &mut manifest).await {
             Ok((path, sha256)) => self.complete(path, sha256).await,

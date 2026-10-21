@@ -4,7 +4,11 @@ use clap::{Args, Parser, Subcommand};
 
 /// RAPIDS command line interface.
 #[derive(Debug, Parser)]
-#[command(name = "rapids", version, about = "Fast private downloads from the command line")]
+#[command(
+    name = "rapids",
+    version,
+    about = "Fast private downloads from the command line"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,

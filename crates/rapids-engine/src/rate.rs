@@ -247,8 +247,22 @@ mod tests {
 
     #[test]
     fn zero_and_none_both_mean_unlimited() {
-        assert!(RateLimiter::new(None).bucket.lock().unwrap().rate_bps.is_none());
-        assert!(RateLimiter::new(Some(0)).bucket.lock().unwrap().rate_bps.is_none());
+        assert!(
+            RateLimiter::new(None)
+                .bucket
+                .lock()
+                .unwrap()
+                .rate_bps
+                .is_none()
+        );
+        assert!(
+            RateLimiter::new(Some(0))
+                .bucket
+                .lock()
+                .unwrap()
+                .rate_bps
+                .is_none()
+        );
         assert_eq!(
             RateLimiter::new(Some(2048)).bucket.lock().unwrap().rate_bps,
             Some(2048)
