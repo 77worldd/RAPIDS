@@ -156,6 +156,14 @@ RAPIDS/
 - **`render.rs`** owns the single live progress line (terminal only; plain lines
   otherwise). `cancel` removes a workspace that is not locked by a live process.
 
+### Test support (`crates/rapids-test-support`)
+- **`lib.rs`** is a thread-per-connection HTTP server on plain `std::net` serving a
+  payload generated from an index. It honours or refuses ranges, validates
+  `If-Range`, throttles per connection, drops connections early on request, and logs
+  every request with its byte count. It also counts in-flight connections and exposes
+  `wait_idle`: a killed client's last connections push their records after the kill,
+  so any byte accounting waits for the server to settle first.
+
 ---
 
 ## 4. Data formats and contracts
@@ -170,7 +178,7 @@ RAPIDS/
 | Views | `src/types.ts` + `navigation.ts` | `CoreViewId` (7 task/scheduled views) ∪ `TagId` (5 categories) |
 | UI prefs | `localStorage['rapids.ui']` | `{ v: 1, sidebarCollapsed: boolean }`, validated on read; non-secret UI state only — secrets never touch localStorage (rule 5 applies from the vault milestone onward) |
 | Icons | `assets/icon-1024.png` → `npx tauri icon` | regenerate the set whenever the mark changes |
-| Download sidecar | `<dest>.rapids/` next to the destination | `manifest.json` + `data.part` + `lock` (OS file lock, released automatically when the process dies) |
+| Download sidecar | `<dest>.rapids/` next to the destination | `manifest.json` + `data.part` + `lock` (OS file lock, released automatically when the process dies). `data.part` is preallocated to the final size when a download starts, so its length never reports progress — the manifest's `written` values do. |
 | Manifest | `<dest>.rapids/manifest.json` | `{ v, url, final_url, dest, total_bytes?, accepts_ranges, etag?, last_modified?, content_type?, filename?, expected_sha256?, observed_sha256?, created_at, segments: [{ i, start, end, written }], completed }` — written temp-file → atomic rename; `written` is a conservative flushed low-water mark |
 | Resume gate | `manifest.can_resume` + part-file check | range support recorded, stored size equals the fresh probe size, part-file length equals that size, and a stored validator (ETag preferred, else Last-Modified) matches the fresh probe — otherwise wipe and restart |
 | Engine events | `spawn_download` receiver (cap 64) | `StateChanged · Progress (coalescible) · Retrying · Completed · Failed · Cancelled`; progress carries downloaded/total/speed/ETA/connections/segment counts |
@@ -207,14 +215,20 @@ Run before every commit:
 | Types (strict, zero errors) | `npm run typecheck` | sandbox (enforced per commit) |
 | Production build | `npm run build` | sandbox (enforced per commit) |
 | Content rules | `npm run gate:content` | sandbox (enforced per commit) |
-| Rust format | `cargo fmt --all` once, then `cargo fmt --all -- --check` | Windows machine (see below) |
-| Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` | Windows machine (see below) |
-| Rust tests | `cargo test --workspace` | Windows machine (see below) |
+| Rust format | `cargo fmt --all` once, then `cargo fmt --all -- --check` | toolchain host (see below) |
+| Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` | toolchain host (see below) |
+| Rust tests | `cargo test --workspace` | toolchain host (see below) |
 
-The sandbox has no Rust toolchain and no route to crates.io (verified by probing), and
-no GUI libraries; the target platform is Windows 11 anyway. The three `cargo` gates
-therefore run on the owner's machine — this split was explicitly approved. Any finding
-they produce is fixed before the session closes.
+The authoring sandbox has no Rust toolchain and no route to crates.io (verified by
+probing), and no GUI libraries; the target platform is Windows 11 anyway. The three
+`cargo` gates therefore run off-sandbox: on the owner's Windows machine and in the
+independent verification environment that has rustc and registry access. Every finding
+either produces is fixed in the session that surfaced it.
+
+Order matters for the Rust gates: `npm run build` first, because `src-tauri` embeds
+`../dist` through `generate_context!` at compile time. Then `cargo build --workspace`,
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+and `cargo test --workspace`.
 
 `scripts/content-gate.mjs` scans authored text files and fails the build on task
 markers, staged-language fillers, deferred-feature phrasing, and invented-data markers
@@ -232,7 +246,7 @@ silently and correctly when opened outside the desktop host.
 | # | Milestone | Status |
 |---|---|---|
 | M0 | Scaffold: Tauri 2 + React + TS + Tailwind shell per design | **complete** (session 1) |
-| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **complete** (session 2) — cargo gates and the DoD download run on the Windows machine |
+| M1 | Engine core: segmented HTTP, kill-safe resume, pause/resume/cancel, events | **code complete** (sessions 2–3) — build, clippy `-D warnings`, and the full suite (28/28, acceptance included) are green on the verification toolchain; the Windows battery with rustfmt and the locked dependency resolution is the remaining gate |
 | M2 | Queue + SQLite + scheduler + limiters | pending |
 | M3 | Full UI wired to engine (both list modes, add dialog, settings, fuzzy search) | pending |
 | M4 | Vault: cookies, proxy, custom headers per task | pending |
@@ -251,10 +265,10 @@ silently and correctly when opened outside the desktop host.
 - The engine and CLI are standalone; nothing in `src/` or `src-tauri/` calls
   `spawn_download` yet (fence for M1). The desktop host attaches at M2/M3.
 - `Cargo.lock` appears with the first `cargo build` on Windows and is committed then.
-- The sandbox has no Rust compiler, so the M1 Rust code is authored against stable
-  APIs without a local compile; the first Windows run is expected to apply rustfmt
-  normalization and to be the proving run for clippy/tests (any findings are fixed
-  before the milestone is called done on the user side).
+- The authoring sandbox has no Rust compiler, so the engine is proven by independent
+  compile runs. The first one showed that `rapids-test-support` had never compiled at
+  all; its findings are repaired and recorded below. M1 stays code complete until a run
+  is green, and a red run is repaired in the session that reports it.
 
 ---
 
@@ -310,3 +324,118 @@ Decisions worth knowing:
   chunk of network time and every network call has a timeout.
 - Tests throttle real sockets instead of mocking: timing behaviour (pause points,
   kill points, retries) is exercised against bytes actually in flight.
+
+### Session 3 — M1 finish: compile repair and an honest acceptance test
+Commits: `fix(engine): repair http worker and probe compile errors` →
+`fix(engine): repair coordinator borrow, control, and client plumbing` →
+`test(cli): make the kill-and-resume acceptance test observable` →
+`fix(cli): bind the cancel target as mutable` →
+`refactor(engine): scope the probe future so its borrows end early` →
+`test(cli): reuse one manifest reader runtime across the kill poll` → this document.
+
+What landed: every compile error from the independent audit is closed, plus the ones
+that only appear once the never-compiled test and CLI sources are read with the
+compiler's rules in mind. No module was split or redesigned. Frontend gates stayed
+green (`gate:content`, `lint`, `typecheck`, `build`).
+
+Fixes, by file:
+- `http/fetch.rs` — the retry jitter seed widens the segment index before rotating it
+  (`u64`, not `u32`); the `Range` header and the short-read retry message bind their
+  numbers as locals, because a format string cannot capture a field access; the worker
+  started message dropped its unused payload, which `-D warnings` would have rejected
+  as a dead field.
+- `http/probe.rs` — the HEAD outcome became one tuple write instead of two variables
+  that were always overwritten (the dead-store warning class), and the
+  `Content-Disposition` filename resolves through `?` so the option is unwrapped before
+  the name is sanitized.
+- `coordinator.rs` — the probe's HTTP client now travels through `Prepared` instead of
+  being rebuilt (one pool, one set of timeouts); the boxed probe future lives in its own
+  block so the shared borrow of `self.spec` ends before the destination branch writes to
+  it; `cancel_now` takes `Option<&mut Workspace>` and both call sites pass it, so a
+  cancel reaches the sidecar; the session control receiver is hoisted out of the pause
+  branch; every checkpoint call passes its directory; `AsyncWriteExt` is imported for the
+  part-file flush; the previous scaling window is an `Option<f64>` instead of a seeded
+  float plus a flag.
+- `crates/rapids-cli` — `rapids cancel` binds its workspace mutably (locking and
+  discarding both take a mutable receiver).
+
+Behaviour worth knowing:
+- Lifting a pause announces `Downloading` before the next session starts. The handle's
+  `resume()` waits for exactly that transition, so without it a resume would wait for an
+  event that never came even though bytes were flowing.
+- The kill-and-resume test no longer observes the part file's length: `data.part` is
+  preallocated to the final size at start, so the old check fired before the first byte
+  arrived and made the "must not refetch everything" assertion impossible. The test now
+  sums the manifest's `written` values, which is the same conservative low-water mark the
+  engine resumes from, and kills at half of the payload on that basis. Two `std::sleep`
+  calls the audit never reached were `std::thread::sleep`.
+
+Status: M1 is code complete and awaiting the proving run on the owner's machine —
+`cargo build --workspace`, `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and
+the acceptance test standalone. `Cargo.lock` is committed with that first resolution.
+
+### Session 3, second pass — independent verification and repairs
+Session 3's own code was compiled and run on a machine with a real toolchain and
+registry access. The engine's logic held up; the build was not green. Everything it
+reported is repaired, with the engine's architecture unchanged.
+
+- Engine: one binding had to be mutable — flushing a part file takes `&mut self` once
+  `AsyncWriteExt` is in scope.
+- `rapids-test-support` had never been compiled by anything, because every earlier
+  build stopped inside the engine library first. Nine errors, all mechanical: header
+  values captured by field access in format strings, a string literal asked for
+  `.into_bytes()`, `u64 % u32`, and a `Cow` returned where `Option<String>` was
+  declared. HEAD and a range-less GET now share one full-body response builder, so
+  that header block exists once instead of twice.
+- Clippy findings (nine): the done and failed worker messages carried a never-read
+  segment index, two module descriptions were `///` above a blank line instead of `//!`,
+  the URL filename fallback took the last segment with `filter().last()` instead of
+  `next_back()`, the backoff multiplication converted a value that was already `u128`,
+  the request target was bound and never read, and the flaky counter compared a
+  remainder to zero instead of using `is_multiple_of`.
+- Kill-and-resume accounting: the engine's resume was proven correct on that machine —
+  the second run requested only the unconfirmed remainders and the final file hashed
+  identically. The failure was in the test's accounting: the server pushes a record
+  when a connection ends, so the killed process's last eight records landed after
+  `clear_requests` and were counted against the resumed run. The server now counts
+  in-flight connections and exposes `wait_idle`; the test waits for it before clearing
+  the log. The per-connection throttle also drops to 2 MB/s, which moves the kill three
+  seconds clear of natural completion instead of sixty milliseconds.
+- Validator-change test: the premise could never happen. The server snapshots its
+  options when a connection starts and the engine keeps one long-lived connection per
+  segment, so with four segments nothing sent another request after the validator
+  flipped, and the task completed on consistent bytes — correct behaviour from the
+  engine, a test that asserted nothing. Early drops now force a post-flip retry that
+  carries `If-Range: "v1"` into a server serving `"v2"`, which is exactly the refusal
+  the test exists to check.
+
+Still pending: `cargo fmt --all` normalization (the Rust side was authored without
+rustfmt, so this is the one expected red gate) and `Cargo.lock`, both handled by the
+owner's Windows run.
+
+### Session 3, third pass — the last two findings
+The second independent run (real toolchain, full registry) was green on build, on the
+whole test suite bar one assertion, and on the 100 MB acceptance test: 28 tests, with
+the kill-and-resume lifecycle visible end to end in 12.7 s and the final file matching
+the source hash. Two findings remained.
+
+- `filter_next` (clippy 1.99): `filename_from_url` walked the path segments with
+  `.filter(|segment| !segment.is_empty())` and then `.next_back()`. Clippy asks for
+  `.rfind()`, which is the same traversal expressed as one call, so the URL filename
+  fallback is now `parsed.path_segments()?.rfind(...)`.
+- A test contradicted the specification. `resume_requires_matching_validator_and_size`
+  expected `can_resume` to accept a fresh probe that drops a stored ETag as long as
+  Last-Modified still matched. That is not the gate: the stored ETag is the preferred
+  validator, so when the manifest holds one the fresh response must re-present it, and
+  a swapped validator means the two responses are no longer comparable — the gate wipes
+  and restarts. The implementation was already correct and is unchanged; the assertion
+  now states the rule (`assert!(!…, None, Some(<matching date>))`) with the reasoning
+  next to it. The sibling case — a stored manifest with no ETag resuming on a matching
+  Last-Modified — is the documented fallback and still asserts `true`.
+  The assertion had never executed before, which is how a spec-violating expectation
+  survived review.
+
+With these two applied the engine side is complete on the verification toolchain:
+build clean, clippy `-D warnings` clean across all three crates and all targets, 28/28
+tests. rustfmt normalization and `Cargo.lock` remain with the Windows battery.

@@ -1,10 +1,8 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rapids_engine::{
-    spawn_download, DownloadSpec, EngineConfig, EngineEvent, Manifest, Workspace,
-};
-use rapids_test_support::{expected_sha256, options, TestServer};
+use rapids_engine::{DownloadSpec, EngineConfig, EngineEvent, Manifest, Workspace, spawn_download};
+use rapids_test_support::{TestServer, expected_sha256, options};
 
 async fn next_event(
     rx: &mut tokio::sync::mpsc::Receiver<EngineEvent>,
@@ -58,8 +56,7 @@ async fn completes_a_segmented_download_and_verifies_sha() {
 
     let mut spec = spec_for(&server.url("/payload.bin"), &dest);
     spec.expected_sha256 = Some(expected.clone());
-    let (handle, mut rx) =
-        spawn_download(spec, EngineConfig::default()).expect("spawn");
+    let (handle, mut rx) = spawn_download(spec, EngineConfig::default()).expect("spawn");
 
     let mut saw_progress = false;
     let completed = wait_for(&mut rx, 30, "completion", |event| {
@@ -110,9 +107,7 @@ async fn single_stream_when_the_server_ignores_ranges() {
             active_connections, ..
         } = event
         {
-            if *active_connections > 1 {
-                exceeded_one_connection = true;
-            }
+            exceeded_one_connection |= *active_connections > 1;
         }
         matches!(event, EngineEvent::Completed { .. })
     })
@@ -157,7 +152,10 @@ async fn flaky_connections_recover_through_retries() {
     drop(handle);
 
     assert!(saw_retry, "dropped connections must surface as retries");
-    assert_eq!(rapids_engine::sha256_file(&dest).expect("hash"), expected_sha256(total));
+    assert_eq!(
+        rapids_engine::sha256_file(&dest).expect("hash"),
+        expected_sha256(total)
+    );
 }
 
 #[tokio::test]
@@ -238,7 +236,10 @@ async fn cancel_discards_the_workspace() {
     .await;
     drop(handle);
 
-    assert!(!Workspace::for_dest(&dest).dir.exists(), "workspace removed");
+    assert!(
+        !Workspace::for_dest(&dest).dir.exists(),
+        "workspace removed"
+    );
     assert!(!dest.exists(), "no final file after cancel");
 }
 
@@ -273,11 +274,15 @@ async fn second_process_is_rejected_while_the_lock_is_held() {
     .await;
     drop(second);
     match failure {
-        EngineEvent::Failed { message } => {
+        EngineEvent::Failed {
+            message,
+            retryable,
+        } => {
             assert!(
                 message.contains("working on"),
                 "message should identify the busy workspace: {message}"
             );
+            assert!(retryable, "a busy workspace is worth another attempt");
         }
         other => panic!("expected rejection, got {other}"),
     }
@@ -320,7 +325,12 @@ async fn empty_file_downloads_to_an_empty_file() {
 async fn mid_download_validator_change_fails_the_task() {
     let total = 16 * 1024 * 1024u64;
     let mut server_options = options(total);
-    server_options.throttle_bps = Some(1024 * 1024);
+    // Every body connection drops after 256 KiB. A healthy long-lived
+    // connection would finish its segment without ever asking the server
+    // again, so the validator flip below would have nothing to intercept;
+    // the drops guarantee that a request carries If-Range after the flip.
+    server_options.flaky_every = Some(1);
+    server_options.flaky_after = 256 * 1024;
     let server = TestServer::start(server_options);
     let dir = tempfile::tempdir().expect("temp dir");
     let dest = dir.path().join("payload.bin");
@@ -330,10 +340,13 @@ async fn mid_download_validator_change_fails_the_task() {
     let (handle, mut rx) = spawn_download(spec, EngineConfig::default()).expect("spawn");
 
     wait_for(&mut rx, 30, "early progress", |event| match event {
-        EngineEvent::Progress { downloaded, .. } => *downloaded >= 1024 * 1024,
+        EngineEvent::Progress { downloaded, .. } => *downloaded >= 512 * 1024,
         _ => false,
     })
     .await;
+    // The next attempt sends If-Range: "v1"; the server now serves "v2", so
+    // the range is refused and the full body arrives instead — which is the
+    // signal the engine must refuse to splice.
     server.set_etag("\"v2\"");
 
     let failure = wait_for(&mut rx, 30, "content-changed failure", |event| {
@@ -343,11 +356,15 @@ async fn mid_download_validator_change_fails_the_task() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed { message } => {
+        EngineEvent::Failed {
+            message,
+            retryable,
+        } => {
             assert!(
                 message.contains("changed on the server"),
                 "failure should explain the content change: {message}"
             );
+            assert!(retryable, "replanning against the new bytes can succeed");
         }
         other => panic!("expected failure, got {other}"),
     }
@@ -373,16 +390,29 @@ async fn mismatched_expected_sha_reports_both_hashes() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed { message } => {
+        EngineEvent::Failed {
+            message,
+            retryable,
+        } => {
             assert!(message.contains("SHA-256 verification failed"));
-            assert!(message.contains(&wrong), "message must show the expectation");
-            assert!(message.contains(&actual), "message must show what was computed");
+            assert!(
+                message.contains(&wrong),
+                "message must show the expectation"
+            );
+            assert!(
+                message.contains(&actual),
+                "message must show what was computed"
+            );
+            assert!(!retryable, "the same bytes will hash the same way again");
         }
         other => panic!("expected verification failure, got {other}"),
     }
 
     let workspace = Workspace::for_dest(&dest);
-    assert!(workspace.part_path.exists(), "bytes are kept for inspection");
+    assert!(
+        workspace.part_path.exists(),
+        "bytes are kept for inspection"
+    );
     let manifest = Manifest::load(&workspace.dir)
         .await
         .expect("manifest present");

@@ -1,5 +1,5 @@
-/// Splitting a file into byte ranges and deciding when another connection
-/// is worth opening.
+//! Splitting a file into byte ranges and deciding when another connection
+//! is worth opening.
 
 /// An inclusive byte range inside the destination file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

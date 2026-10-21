@@ -9,7 +9,7 @@ use clap::Parser;
 use tokio::sync::Notify;
 
 use rapids_engine::{
-    spawn_download, DownloadSpec, DownloadState, EngineConfig, EngineEvent, Workspace,
+    DownloadSpec, DownloadState, EngineConfig, EngineEvent, Workspace, spawn_download,
 };
 
 #[tokio::main]
@@ -86,7 +86,7 @@ async fn run_get(args: cli::GetArgs) -> ExitCode {
 
 async fn run_cancel(args: cli::CancelArgs) -> ExitCode {
     let dest = destination_of(&args.target);
-    let workspace = Workspace::for_dest(&dest);
+    let mut workspace = Workspace::for_dest(&dest);
     if let Err(error) = workspace.create_and_lock().await {
         eprintln!("rapids: {error}");
         return ExitCode::from(3);

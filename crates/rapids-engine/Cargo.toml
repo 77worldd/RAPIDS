@@ -18,3 +18,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", 
 [dev-dependencies]
 rapids-test-support = { path = "../rapids-test-support" }
 tempfile = "3"
+# Dev-only: paused clocks make the bucket arithmetic deterministic in tests.
+tokio = { version = "1", features = ["test-util"] }

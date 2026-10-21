@@ -103,9 +103,7 @@ impl Workspace {
                 Err(error) => return Err(EngineError::io("clear workspace", path, error)),
             }
         }
-        let temp = self
-            .dir
-            .join(crate::manifest::MANIFEST_TEMP_FILE);
+        let temp = self.dir.join(crate::manifest::MANIFEST_TEMP_FILE);
         let _ = tokio::fs::remove_file(temp).await;
         Ok(())
     }

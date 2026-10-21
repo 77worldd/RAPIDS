@@ -4,13 +4,14 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use reqwest::header::{IF_RANGE, RANGE};
 use reqwest::Response;
+use reqwest::header::{IF_RANGE, RANGE};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
+use crate::rate::RateLimits;
 use crate::segmenter::Segment;
 
 /// Stop conditions broadcast by the coordinator. Workers re-read them after
@@ -44,14 +45,9 @@ pub(crate) fn apply_control(sender: &watch::Sender<Control>, update: impl FnOnce
 
 /// Messages workers send back to the coordinator.
 pub(crate) enum CoordMsg {
-    Started {
-        index: u32,
-    },
-    Done {
-        index: u32,
-    },
+    Started,
+    Done,
     Failed {
-        index: u32,
         error: EngineError,
     },
     Retrying {
@@ -72,6 +68,8 @@ pub(crate) struct DownloadContext {
     pub last_modified: Option<String>,
     pub accepts_ranges: bool,
     pub total: Option<u64>,
+    /// Every bandwidth ceiling that applies to this download.
+    pub limits: RateLimits,
 }
 
 /// Multi-consumer segment queue: workers pull while the coordinator owns
@@ -129,6 +127,7 @@ struct TransferPolicy {
     idle_read_timeout: Duration,
     target: Option<u64>,
     part_path: PathBuf,
+    limits: RateLimits,
 }
 
 /// One worker: pull segments until the queue is empty or a stop flag lands.
@@ -163,17 +162,13 @@ pub(crate) async fn worker_loop(
             None => false,
         };
         if already_done {
-            let _ = coord.send(CoordMsg::Done {
-                index: segment.index,
-            }).await;
+            let _ = coord.send(CoordMsg::Done).await;
             continue;
         }
 
         active.fetch_add(1, Ordering::AcqRel);
         started.fetch_add(1, Ordering::AcqRel);
-        let _ = coord.send(CoordMsg::Started {
-            index: segment.index,
-        }).await;
+        let _ = coord.send(CoordMsg::Started).await;
 
         let atomic = &progress[index];
         let result = run_with_retries(&context, segment, &control, &mut wake, atomic, &coord).await;
@@ -181,17 +176,11 @@ pub(crate) async fn worker_loop(
 
         match result {
             Ok(RunOutcome::Done) => {
-                let _ = coord.send(CoordMsg::Done {
-                    index: segment.index,
-                }).await;
+                let _ = coord.send(CoordMsg::Done).await;
             }
             Ok(RunOutcome::Stopped) => return,
             Err(error) => {
-                let _ = coord.send(CoordMsg::Failed {
-                    index: segment.index,
-                    error,
-                })
-                .await;
+                let _ = coord.send(CoordMsg::Failed { error }).await;
                 return;
             }
         }
@@ -227,7 +216,9 @@ async fn run_with_retries(
                     return Err(EngineError::network("download segment", reason, attempt));
                 }
                 let base = super::base_backoff(&context.config, attempt);
-                let entropy = super::now_entropy() ^ segment.index.rotate_left(11);
+                // The jitter seed is 64-bit; widening the segment index keeps
+                // parallel segments from sharing one retry rhythm.
+                let entropy = super::now_entropy() ^ u64::from(segment.index).rotate_left(11);
                 let delay = super::jittered_backoff(base, entropy);
                 let _ = coord
                     .send(CoordMsg::Retrying {
@@ -277,25 +268,18 @@ async fn attempt_segment(
         .open(&context.part_path)
         .await
         .map_err(|error| {
-            AttemptFailure::Fatal(EngineError::io(
-                "open part file",
-                &context.part_path,
-                error,
-            ))
+            AttemptFailure::Fatal(EngineError::io("open part file", &context.part_path, error))
         })?;
     file.seek(std::io::SeekFrom::Start(start_offset))
         .await
         .map_err(|error| {
-            AttemptFailure::Fatal(EngineError::io(
-                "seek part file",
-                &context.part_path,
-                error,
-            ))
+            AttemptFailure::Fatal(EngineError::io("seek part file", &context.part_path, error))
         })?;
 
     let mut request = context.client.get(&context.final_url);
     if ranged {
-        request = request.header(RANGE, format!("bytes={start_offset}-{segment.end}"));
+        let range_end = segment.end;
+        request = request.header(RANGE, format!("bytes={start_offset}-{range_end}"));
         if let Some(etag) = &context.etag {
             request = request.header(IF_RANGE, etag.clone());
         } else if let Some(last_modified) = &context.last_modified {
@@ -307,13 +291,9 @@ async fn attempt_segment(
         Err(_) => {
             return Err(AttemptFailure::Retry(
                 "response headers exceeded the header timeout".to_string(),
-            ))
+            ));
         }
-        Ok(Err(error)) => {
-            return Err(AttemptFailure::Retry(format!(
-                "connection failed: {error}"
-            )))
-        }
+        Ok(Err(error)) => return Err(AttemptFailure::Retry(format!("connection failed: {error}"))),
         Ok(Ok(response)) => response,
     };
 
@@ -335,12 +315,12 @@ async fn attempt_segment(
                     Some(_) => {
                         return Err(AttemptFailure::Fatal(EngineError::protocol(format!(
                             "server returned a different range than requested ({value})"
-                        ))))
+                        ))));
                     }
                     None => {
                         return Err(AttemptFailure::Fatal(EngineError::protocol(
                             "206 response without a parseable Content-Range",
-                        )))
+                        )));
                     }
                 }
             } else {
@@ -353,7 +333,7 @@ async fn attempt_segment(
         408 | 429 | 500..=599 => {
             return Err(AttemptFailure::Retry(format!(
                 "server responded with HTTP {status}"
-            )))
+            )));
         }
         416 if ranged => {
             return Err(AttemptFailure::Fatal(EngineError::SizeChanged));
@@ -362,7 +342,7 @@ async fn attempt_segment(
             return Err(AttemptFailure::Fatal(EngineError::HttpStatus {
                 status,
                 url: context.final_url.clone(),
-            }))
+            }));
         }
     }
 
@@ -375,6 +355,7 @@ async fn attempt_segment(
         idle_read_timeout: context.config.idle_read_timeout,
         target,
         part_path: context.part_path.clone(),
+        limits: context.limits.clone(),
     };
     let mut cursor = ProgressCursor {
         atomic: progress,
@@ -417,12 +398,12 @@ async fn pump_body(
             Some(Err(_elapsed)) => {
                 return Err(AttemptFailure::Retry(
                     "no data received before the read timeout".to_string(),
-                ))
+                ));
             }
             Some(Ok(Err(error))) => {
                 return Err(AttemptFailure::Retry(format!(
                     "connection dropped during transfer: {error}"
-                )))
+                )));
             }
             Some(Ok(Ok(None))) => break,
             Some(Ok(Ok(Some(bytes)))) => {
@@ -436,6 +417,17 @@ async fn pump_body(
                     return Err(AttemptFailure::Fatal(EngineError::protocol(
                         "server sent more bytes than the range allows",
                     )));
+                }
+                // Bandwidth is paid for before the bytes land, so the
+                // progress atomic never reports data that the limit has
+                // not allowed yet. The callback keeps a pause or cancel
+                // responsive while a slow bucket is being filled.
+                if !policy
+                    .limits
+                    .acquire_while(length, || !control.borrow().stop_requested())
+                    .await
+                {
+                    return Err(AttemptFailure::Stop);
                 }
                 file.write_all(&bytes[..]).await.map_err(|error| {
                     AttemptFailure::Fatal(EngineError::io(
@@ -452,9 +444,12 @@ async fn pump_body(
 
     match policy.target {
         Some(limit) if cursor.position >= limit => Ok(()),
-        Some(limit) => Err(AttemptFailure::Retry(format!(
-            "connection closed after {cursor.position} of {limit} bytes"
-        ))),
+        Some(limit) => {
+            let position = cursor.position;
+            Err(AttemptFailure::Retry(format!(
+                "connection closed after {position} of {limit} bytes"
+            )))
+        }
         None => Ok(()),
     }
 }

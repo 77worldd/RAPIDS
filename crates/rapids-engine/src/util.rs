@@ -1,5 +1,5 @@
-/// Human-readable byte and duration formatting shared by the engine's
-/// display implementations and the command line renderer.
+//! Human-readable byte and duration formatting shared by the engine's
+//! display implementations and the command line renderer.
 
 pub fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
