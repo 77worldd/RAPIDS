@@ -280,7 +280,10 @@ pub(crate) fn filename_from_content_disposition(value: &str) -> Option<String> {
 }
 
 /// Falls back to the last meaningful path segment of the URL.
-pub(crate) fn filename_from_url(url: &str) -> Option<String> {
+///
+/// Hosts that must choose a destination before a probe runs use this, so the
+/// name they pick is sanitized by the same rules the engine applies.
+pub fn filename_from_url(url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
     let segment = parsed
         .path_segments()?

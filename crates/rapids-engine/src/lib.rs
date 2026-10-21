@@ -26,6 +26,7 @@ pub use coordinator::{DownloadHandle, DownloadSpec, spawn_download};
 pub use error::EngineError;
 pub use events::{DownloadState, EngineEvent};
 pub use hash::{sha256_file, sha256_hex};
+pub use http::probe::filename_from_url;
 pub use manifest::{Manifest, SegmentState};
 pub use rate::{RateLimiter, RateLimits};
 pub use segmenter::{ScaleDecision, Segment, scaling_decision, tile};

@@ -2,14 +2,19 @@
 //! lifecycle of running downloads.
 //!
 //! The desktop shell is a thin adapter over this crate. Nothing here names a
-//! window, a Tauri type, or an app handle: events leave through an event sink
-//! trait implemented by the caller, and every behaviour is exercised headless
-//! in this crate's own tests.
+//! window, a Tauri type, or an app handle: events leave through the
+//! [`EventSink`] trait, which the adapter implements and tests record, and
+//! every behaviour is exercised headless in this crate's own tests.
 
 pub mod error;
+pub mod events;
+pub mod manager;
+mod runner;
 pub mod store;
 
 pub use error::HostError;
+pub use events::{EventSink, HostEvent, NullSink, ProgressUpdate, RecordingSink, TaskView};
+pub use manager::{AddRequest, ManagerHandle};
 
 /// Milliseconds since the Unix epoch. Callers pass the clock in rather than
 /// letting queries read it, so tests can place a task in the past or the
