@@ -149,8 +149,11 @@ mod tests {
     #[test]
     fn many_tasks_are_sent_together_in_arrival_order() {
         let mut buffer = ProgressBuffer::new();
+        // Arrivals start at zero so the first sample opens the window
+        // immediately; the deadline is then exactly one window later instead
+        // of one window after an arbitrary arrival offset.
         for id in 1..=5 {
-            buffer.push(sample(id, id * 10), id);
+            buffer.push(sample(id, id * 10), id - 1);
         }
         let batch = buffer.take_due(500).expect("due");
         assert_eq!(ids(&batch), vec![1, 2, 3, 4, 5]);
