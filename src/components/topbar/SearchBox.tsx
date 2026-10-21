@@ -8,7 +8,7 @@ export function SearchBox() {
   const clearSearch = () => dispatch({ type: "search/set", query: "" });
 
   return (
-    <div className="relative w-64">
+    <div className="relative w-64 min-w-32 shrink">
       <Search
         size={13}
         strokeWidth={1.75}
