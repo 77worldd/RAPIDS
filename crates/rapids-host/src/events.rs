@@ -74,7 +74,7 @@ pub struct ProgressUpdate {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HostEvent {
     /// A task's authoritative row after any transition. The shell upserts it.
-    TaskChanged { task: TaskView },
+    TaskChanged { task: Box<TaskView> },
     /// A task row no longer exists.
     TaskRemoved { id: i64 },
     /// Display-only samples; never used to decide anything.

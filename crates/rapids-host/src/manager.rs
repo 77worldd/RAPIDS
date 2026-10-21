@@ -489,9 +489,14 @@ impl Manager {
             created_at: now,
         };
         let id = tasks::insert(self.store.pool(), &new).await?;
+        // The reply is the state the caller's insert produced. Reading it
+        // after the queue has been pumped would report a task that is already
+        // running, and the later transition reaches the shell as its own
+        // TaskChanged anyway.
+        let view = self.view(id).await?;
         self.emit_changed(id).await;
         self.pump().await?;
-        self.view(id).await
+        Ok(view)
     }
 
     async fn list(&self) -> Result<Vec<TaskView>, HostError> {
@@ -757,7 +762,7 @@ impl Manager {
     async fn emit_changed(&self, id: i64) {
         if let Ok(row) = self.row(id).await {
             self.sink.emit(HostEvent::TaskChanged {
-                task: TaskView::from_row(&row),
+                task: Box::new(TaskView::from_row(&row)),
             });
         }
     }
