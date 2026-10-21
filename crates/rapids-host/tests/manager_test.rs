@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use rapids_engine::{Manifest, Workspace};
 use rapids_host::events::{EventSink, HostEvent, RecordingSink};
 use rapids_host::store::{
     Store, TaskCategory, TaskRow, TaskStatus, history, settings, tasks,
@@ -449,6 +450,138 @@ async fn interrupted_rows_return_to_the_queue_on_startup() {
 
     manager.shutdown().await;
     let _ = join.await;
+}
+
+#[tokio::test]
+async fn shutdown_unlocks_a_running_download_and_restarts_from_its_sidecar() {
+    let total = 16 * 1024 * 1024u64;
+    let mut server_options = options(total);
+    server_options.throttle_bps = Some(512 * 1024);
+    let server = TestServer::start(server_options);
+    let harness = Harness::start().await;
+
+    let view = harness
+        .manager
+        .add(harness.request(&server.url("/payload.bin")))
+        .await
+        .expect("add");
+    let running = harness
+        .wait_for(view.id, "progress before shutdown", |row| {
+            row.downloaded >= 2 * 1024 * 1024
+        })
+        .await;
+    assert_eq!(running.status_enum(), Some(TaskStatus::Downloading));
+
+    let Harness {
+        store,
+        manager,
+        sink: _,
+        join,
+        downloads,
+        _dir,
+    } = harness;
+    tokio::time::timeout(Duration::from_secs(15), manager.shutdown())
+        .await
+        .expect("shutdown completed");
+    join.await.expect("first manager stopped");
+
+    let interrupted = tasks::get(store.pool(), view.id)
+        .await
+        .expect("read task")
+        .expect("task survives shutdown");
+    assert_eq!(interrupted.status_enum(), Some(TaskStatus::Downloading));
+    assert!(
+        history::recent(store.pool(), 10)
+            .await
+            .expect("history")
+            .is_empty(),
+        "stopping does not record a failed or cancelled outcome"
+    );
+    let dest = downloads.join("payload.bin");
+    let workspace = Workspace::for_dest(&dest);
+    let saved = Manifest::load(&workspace.dir)
+        .await
+        .expect("shutdown checkpoint");
+    let confirmed: u64 = saved.segments.iter().map(|segment| segment.written).sum();
+    assert!(
+        confirmed >= u64::try_from(interrupted.downloaded).expect("non-negative progress")
+            && confirmed < total,
+        "checkpoint saved {confirmed} of {total} bytes"
+    );
+    assert!(workspace.part_path.exists());
+    assert!(!dest.exists());
+
+    // This is still the same process. The manager's acknowledgement must
+    // mean the engine has released the workspace, not merely paused it.
+    let mut claimant = Workspace::for_dest(&dest);
+    claimant.create_and_lock().await.expect("workspace unlocked");
+    drop(claimant);
+    drop(manager);
+    Arc::try_unwrap(store)
+        .unwrap_or_else(|_| panic!("the first manager still holds the store"))
+        .close()
+        .await;
+
+    assert!(server.wait_idle(Duration::from_secs(10)), "old requests settled");
+    server.clear_requests();
+    let store = Arc::new(
+        Store::open(&_dir.path().join("rapids.db"))
+            .await
+            .expect("reopen store"),
+    );
+    let (restarted, join) = rapids_host::manager::spawn(
+        Arc::clone(&store),
+        Arc::new(RecordingSink::new()),
+        Clock::utc(),
+    );
+    let deadline = Instant::now() + WAIT;
+    let done = loop {
+        let row = tasks::get(store.pool(), view.id)
+            .await
+            .expect("read restarted task")
+            .expect("task remains present");
+        if row.status_enum() == Some(TaskStatus::Completed) {
+            break row;
+        }
+        assert_ne!(
+            row.status_enum(),
+            Some(TaskStatus::Error),
+            "restart failed: {:?}",
+            row.error_message.as_deref()
+        );
+        if Instant::now() >= deadline {
+            panic!("restart stalled in {}", row.status);
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    let expected = expected_sha256(total);
+    assert_eq!(done.observed_sha256.as_deref(), Some(expected.as_str()));
+    assert_eq!(rapids_engine::sha256_file(&dest).expect("hash"), expected);
+    assert!(!workspace.dir.exists(), "completion removes the sidecar");
+    restarted.list().await.expect("manager caught up");
+    let entries = history::recent(store.pool(), 10).await.expect("history");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].outcome, "completed");
+    assert_eq!(entries[0].task_id, view.id);
+    assert!(server.wait_idle(Duration::from_secs(10)), "resumed requests settled");
+    let refetched: u64 = server
+        .requests()
+        .iter()
+        .filter(|record| record.method == "GET")
+        .map(|record| record.body_len)
+        .sum();
+    assert!(
+        refetched < total * 9 / 10,
+        "the restart fetched {refetched} of {total} bytes"
+    );
+
+    restarted.shutdown().await;
+    join.await.expect("restarted manager stopped");
+    drop(restarted);
+    Arc::try_unwrap(store)
+        .unwrap_or_else(|_| panic!("the restarted manager still holds the store"))
+        .close()
+        .await;
 }
 
 #[tokio::test]

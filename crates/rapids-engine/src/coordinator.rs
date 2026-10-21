@@ -36,6 +36,7 @@ pub struct DownloadSpec {
 struct HandleInner {
     control: Arc<watch::Sender<Control>>,
     state: watch::Receiver<DownloadState>,
+    finished: watch::Receiver<bool>,
 }
 
 /// Live control surface for a running download.
@@ -68,6 +69,32 @@ impl DownloadHandle {
             flags.paused = false;
         });
         self.wait_for(DownloadState::Cancelled).await;
+    }
+
+    /// Ends this run without discarding its part file. Once transfer has
+    /// begun, workers finish their writes and the manifest is checkpointed.
+    /// The workspace lock is released before this returns. A later run
+    /// rechecks the sidecar's size, range support, and validator before
+    /// trusting any saved bytes.
+    pub async fn stop(&self) {
+        if !self.state().is_terminal() {
+            apply_control(&self.inner.control, |flags| {
+                flags.stopping = true;
+                flags.paused = false;
+            });
+        }
+        // A natural completion or failure can race this request. Waiting for
+        // the task itself, rather than merely a terminal state, also covers
+        // the time between a terminal event and the lock being dropped.
+        let mut finished = self.inner.finished.clone();
+        loop {
+            if *finished.borrow() {
+                return;
+            }
+            if finished.changed().await.is_err() {
+                return;
+            }
+        }
     }
 
     async fn wait_for(&self, target: DownloadState) {
@@ -131,10 +158,12 @@ pub fn spawn_download(
     let (control_tx, control_rx) = watch::channel(Control::default());
     let control_tx = Arc::new(control_tx);
     let (state_tx, state_rx) = watch::channel(DownloadState::Probing);
+    let (finished_tx, finished_rx) = watch::channel(false);
     let handle = DownloadHandle {
         inner: Arc::new(HandleInner {
             control: control_tx.clone(),
             state: state_rx,
+            finished: finished_rx,
         }),
     };
     let coordinator = Coordinator {
@@ -147,6 +176,7 @@ pub fn spawn_download(
     };
     tokio::spawn(async move {
         coordinator.run().await;
+        let _ = finished_tx.send_replace(true);
     });
     Ok((handle, event_rx))
 }
@@ -228,6 +258,14 @@ impl Coordinator {
             }
             Err(error) => self.fail(error).await,
         }
+    }
+
+    async fn stop_now(&self, workspace: Option<Workspace>) {
+        // Pausing leaves this file handle locked. Stop must drop it before
+        // telling the caller the run is over, without removing the sidecar.
+        drop(workspace);
+        self.transition(DownloadState::Stopped).await;
+        self.emit(EngineEvent::Stopped).await;
     }
 
     async fn checkpoint(
@@ -429,7 +467,18 @@ impl Coordinator {
             workspace = Some(created);
         }
 
-        // --- probe the server (cancel-aware) ---------------------------
+        // A stop that arrives during workspace setup must not begin a probe.
+        let flags = *self.control_rx.borrow();
+        if flags.cancelled {
+            self.cancel_now(workspace.as_mut()).await;
+            return None;
+        }
+        if flags.stopping {
+            self.stop_now(workspace.take()).await;
+            return None;
+        }
+
+        // --- probe the server (cancel- and stop-aware) ------------------
         let client = match build_client(&self.config) {
             Ok(client) => client,
             Err(error) => {
@@ -447,16 +496,30 @@ impl Coordinator {
                 tokio::select! {
                     result = &mut probe_fut => break result,
                     changed = wake.changed() => {
-                        if changed.is_err() || self.control.borrow().cancelled {
+                        let flags = *self.control_rx.borrow();
+                        if changed.is_err() || flags.cancelled {
                             // Returning here drops `probe_fut`, which cancels
                             // the request.
                             self.cancel_now(workspace.as_mut()).await;
+                            return None;
+                        }
+                        if flags.stopping {
+                            self.stop_now(workspace.take()).await;
                             return None;
                         }
                     }
                 }
             }
         };
+        let flags = *self.control_rx.borrow();
+        if flags.cancelled {
+            self.cancel_now(workspace.as_mut()).await;
+            return None;
+        }
+        if flags.stopping {
+            self.stop_now(workspace.take()).await;
+            return None;
+        }
         let probe = match probe_result {
             Ok(result) => result,
             Err(error) => {
@@ -547,6 +610,15 @@ impl Coordinator {
             stored,
             client,
         } = prepared;
+        let flags = *self.control_rx.borrow();
+        if flags.cancelled {
+            self.cancel_now(Some(&mut workspace)).await;
+            return;
+        }
+        if flags.stopping {
+            self.stop_now(Some(workspace)).await;
+            return;
+        }
         let Some(dest) = self.spec.dest.clone() else {
             self.fail(EngineError::protocol("destination was not resolved"))
                 .await;
@@ -653,6 +725,24 @@ impl Coordinator {
                 self.cancel_now(Some(&mut workspace)).await;
                 return;
             }
+            if flags.stopping {
+                let checkpoint = self
+                    .checkpoint(&workspace.dir, &mut manifest, &progress)
+                    .await;
+                let cancelled = self.control_rx.borrow().cancelled;
+                if cancelled {
+                    self.cancel_now(Some(&mut workspace)).await;
+                    return;
+                }
+                match checkpoint {
+                    Ok(()) => self.stop_now(Some(workspace)).await,
+                    Err(error) => {
+                        drop(workspace);
+                        self.fail(error).await;
+                    }
+                }
+                return;
+            }
             if flags.paused {
                 if let Err(error) = self
                     .checkpoint(&workspace.dir, &mut manifest, &progress)
@@ -665,7 +755,7 @@ impl Coordinator {
                 let mut pause_wake = self.control_rx.clone();
                 loop {
                     let inner = *self.control_rx.borrow();
-                    if !inner.paused || inner.cancelled {
+                    if !inner.paused || inner.cancelled || inner.stopping {
                         break;
                     }
                     if pause_wake.changed().await.is_err() {
@@ -676,8 +766,9 @@ impl Coordinator {
                 }
                 // A resume lifts the pause before a single new byte moves, so
                 // announce the state here; the handle's resume call waits for
-                // exactly this transition.
-                if !self.control_rx.borrow().cancelled {
+                // exactly this transition. Stop goes straight to its checkpoint.
+                let flags = *self.control_rx.borrow();
+                if !flags.cancelled && !flags.stopping {
                     self.transition(DownloadState::Downloading).await;
                 }
                 continue 'run;
@@ -727,7 +818,7 @@ impl Coordinator {
                     self.cancel_now(Some(&mut workspace)).await;
                     return;
                 }
-                if flags.paused {
+                if flags.stopping || flags.paused {
                     join_workers(workers).await;
                     continue 'run;
                 }

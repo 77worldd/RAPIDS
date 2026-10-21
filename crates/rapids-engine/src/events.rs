@@ -11,11 +11,13 @@ pub enum DownloadState {
     Completed,
     Failed,
     Cancelled,
+    /// Any existing part file and manifest remain; the lock is released.
+    Stopped,
 }
 
 impl DownloadState {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled | Self::Stopped)
     }
 }
 
@@ -29,6 +31,7 @@ impl fmt::Display for DownloadState {
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::Stopped => "stopped",
         };
         f.write_str(text)
     }
@@ -71,13 +74,15 @@ pub enum EngineEvent {
         retryable: bool,
     },
     Cancelled,
+    /// Shutdown without deleting any saved work or recording an outcome.
+    Stopped,
 }
 
 impl EngineEvent {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Completed { .. } | Self::Failed { .. } | Self::Cancelled
+            Self::Completed { .. } | Self::Failed { .. } | Self::Cancelled | Self::Stopped
         )
     }
 }
@@ -125,6 +130,7 @@ impl fmt::Display for EngineEvent {
             },
             Self::Failed { message, .. } => write!(f, "failed: {message}"),
             Self::Cancelled => f.write_str("cancelled"),
+            Self::Stopped => f.write_str("stopped; saved bytes will be checked on restart"),
         }
     }
 }

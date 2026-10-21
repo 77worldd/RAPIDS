@@ -15,11 +15,12 @@ use crate::rate::RateLimits;
 use crate::segmenter::Segment;
 
 /// Stop conditions broadcast by the coordinator. Workers re-read them after
-/// every chunk and whenever a watch notification arrives, so pause, cancel,
-/// and abort land within one chunk of network time.
+/// every chunk and whenever a watch notification arrives, so pause, stop,
+/// cancel, and abort land within one chunk of network time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct Control {
     pub paused: bool,
+    pub stopping: bool,
     pub cancelled: bool,
     pub aborted: bool,
     pub shutdown: bool,
@@ -27,7 +28,7 @@ pub(crate) struct Control {
 
 impl Control {
     pub fn stop_requested(&self) -> bool {
-        self.paused || self.cancelled || self.aborted || self.shutdown
+        self.paused || self.stopping || self.cancelled || self.aborted || self.shutdown
     }
 }
 

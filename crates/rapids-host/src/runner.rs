@@ -95,6 +95,9 @@ pub(crate) fn start(
                     let _ = reports.send(Report::Cancelled { id }).await;
                     break;
                 }
+                // A host shutdown leaves the row in place. Startup requeues
+                // it; the engine's sidecar decides which bytes may resume.
+                EngineEvent::Stopped => break,
                 EngineEvent::StateChanged { .. } | EngineEvent::Retrying { .. } => {}
             }
         }

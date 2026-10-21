@@ -197,8 +197,8 @@ impl ManagerHandle {
         receive(answer).await
     }
 
-    /// Parks every running download (the engine checkpoints on the way down),
-    /// then stops the manager task.
+    /// Checkpoints running downloads and releases their workspace locks,
+    /// then stops the manager task. Interrupted rows requeue on startup.
     pub async fn shutdown(&self) {
         let (reply, answer) = oneshot::channel();
         if self.send(Command::Shutdown { reply }).await.is_ok() {
@@ -847,10 +847,25 @@ impl Manager {
     }
 
     async fn stop_all(&mut self) {
-        let handles: Vec<DownloadHandle> = self.running.drain().map(|(_, handle)| handle).collect();
+        // No new task may start while terminal reports from running ones land.
+        self.paused = true;
+        let handles: Vec<DownloadHandle> = self.running.values().cloned().collect();
         for handle in handles {
-            handle.pause().await;
+            let stop = handle.stop();
+            tokio::pin!(stop);
+            loop {
+                let report = tokio::select! {
+                    biased;
+                    _ = &mut stop => break,
+                    Some(report) = self.report_rx.recv() => report,
+                };
+                self.handle_report(report).await;
+            }
         }
+        while let Ok(report) = self.report_rx.try_recv() {
+            self.handle_report(report).await;
+        }
+        self.running.clear();
     }
 
     async fn row(&self, id: i64) -> Result<TaskRow, HostError> {
