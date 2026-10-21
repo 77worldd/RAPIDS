@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rapids_engine::{DownloadHandle, DownloadSpec, EngineConfig, filename_from_url};
 use tokio::sync::{mpsc, oneshot};
@@ -17,6 +17,7 @@ use tokio::time::MissedTickBehavior;
 use crate::error::HostError;
 use crate::events::{EventSink, HostEvent, TaskView};
 use crate::now_ms;
+use crate::progress::ProgressBuffer;
 use crate::runner::{self, Report};
 use crate::scheduler::{self, Clock, Window};
 use crate::store::settings;
@@ -31,6 +32,12 @@ use crate::store::{
 /// for a start window and coarse enough that an idle app wakes four times a
 /// minute at most.
 const TICK: Duration = Duration::from_secs(1);
+
+/// The most connections one download may ask the engine for. The engine
+/// rejects anything outside 1..=32 as an invalid spec, and an invalid spec is
+/// not retryable, so a value above this would fail a task on its first
+/// attempt. Anything derived from a global budget is clamped to it here.
+pub const MAX_CONNECTIONS_PER_TASK: u8 = 32;
 
 /// Everything a caller must supply to enqueue work.
 #[derive(Debug, Clone)]
@@ -77,6 +84,21 @@ enum Command {
     Reorder {
         id: i64,
         priority: i64,
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
+    /// Stops starting new work. Running downloads are left alone.
+    PauseQueue {
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
+    ResumeQueue {
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
+    QueueState {
+        reply: oneshot::Sender<Result<bool, HostError>>,
+    },
+    /// Re-reads what the queue depends on. Settings and schedules that change
+    /// while work is waiting take effect here instead of at the next start.
+    Refresh {
         reply: oneshot::Sender<Result<(), HostError>>,
     },
     Shutdown {
@@ -149,6 +171,32 @@ impl ManagerHandle {
         receive(answer).await
     }
 
+    pub async fn pause_queue(&self) -> Result<(), HostError> {
+        let (reply, answer) = oneshot::channel();
+        self.send(Command::PauseQueue { reply }).await?;
+        receive(answer).await
+    }
+
+    pub async fn resume_queue(&self) -> Result<(), HostError> {
+        let (reply, answer) = oneshot::channel();
+        self.send(Command::ResumeQueue { reply }).await?;
+        receive(answer).await
+    }
+
+    pub async fn queue_paused(&self) -> Result<bool, HostError> {
+        let (reply, answer) = oneshot::channel();
+        self.send(Command::QueueState { reply }).await?;
+        receive(answer).await
+    }
+
+    /// Lets the manager catch up with a change made elsewhere: a new setting,
+    /// a schedule that just became enabled or disappeared.
+    pub async fn refresh(&self) -> Result<(), HostError> {
+        let (reply, answer) = oneshot::channel();
+        self.send(Command::Refresh { reply }).await?;
+        receive(answer).await
+    }
+
     /// Parks every running download (the engine checkpoints on the way down),
     /// then stops the manager task.
     pub async fn shutdown(&self) {
@@ -193,6 +241,13 @@ struct Manager {
     sink: Arc<dyn EventSink>,
     clock: Clock,
     ticker: tokio::time::Interval,
+    /// When this manager started, on the monotonic clock. Progress batching
+    /// measures against it, so a wall-clock adjustment cannot stretch a batch.
+    started: Instant,
+    progress: ProgressBuffer,
+    /// True when the queue is paused: running downloads continue, nothing new
+    /// starts.
+    paused: bool,
     running: HashMap<i64, DownloadHandle>,
     reports: mpsc::Sender<Report>,
     report_rx: mpsc::Receiver<Report>,
@@ -220,6 +275,9 @@ pub fn spawn(
         sink,
         clock,
         ticker,
+        started: Instant::now(),
+        progress: ProgressBuffer::new(),
+        paused: false,
         running: HashMap::new(),
         reports: report_tx,
         report_rx,
@@ -284,6 +342,9 @@ impl Manager {
     /// and its window may not be open. Scheduled rows are never picked up —
     /// the tick moves them into the queue when their window opens.
     async fn pump(&mut self) -> Result<(), HostError> {
+        if self.paused {
+            return Ok(());
+        }
         let max_parallel = settings::get_i64(self.store.pool(), settings::MAX_PARALLEL, 3)
             .await
             .unwrap_or(3)
@@ -332,7 +393,25 @@ impl Manager {
         if !schedules.is_empty() {
             self.reconcile_windows(now, &schedules).await;
         }
+        if let Some(batch) = self.progress.take_due(self.progress_clock()) {
+            self.sink.emit(batch);
+        }
         let _ = self.pump().await;
+    }
+
+    /// Milliseconds since this manager started. Batches are timed by elapsed
+    /// time, so moving the system clock cannot hold a sample back or push it
+    /// out early.
+    fn progress_clock(&self) -> i64 {
+        i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX)
+    }
+
+    /// Sends whatever progress is pending, so the last sample of a download
+    /// is not stranded behind a window nothing will check again.
+    fn flush_progress(&mut self) {
+        if let Some(batch) = self.progress.flush() {
+            self.sink.emit(batch);
+        }
     }
 
     /// Keeps the queue and the windows in agreement.
@@ -386,7 +465,10 @@ impl Manager {
             url: row.url.clone(),
             dest: Some(PathBuf::from(&row.dest_path)),
             expected_sha256: row.expected_sha256.clone(),
-            connections: row.connections.and_then(|value| u8::try_from(value).ok()),
+            connections: row
+                .connections
+                .and_then(|value| u8::try_from(value).ok())
+                .map(|connections| connections.clamp(1, MAX_CONNECTIONS_PER_TASK)),
             overwrite: false,
         };
         let config = EngineConfig {
@@ -449,6 +531,28 @@ impl Manager {
             }
             Command::Reorder { id, priority, reply } => {
                 let result = self.reorder(id, priority).await;
+                let _ = reply.send(result);
+                false
+            }
+            Command::PauseQueue { reply } => {
+                self.paused = true;
+                self.sink.emit(HostEvent::QueueChanged);
+                let _ = reply.send(Ok(()));
+                false
+            }
+            Command::ResumeQueue { reply } => {
+                self.paused = false;
+                self.sink.emit(HostEvent::QueueChanged);
+                let result = self.pump().await;
+                let _ = reply.send(result);
+                false
+            }
+            Command::QueueState { reply } => {
+                let _ = reply.send(Ok(self.paused));
+                false
+            }
+            Command::Refresh { reply } => {
+                let result = self.pump().await;
                 let _ = reply.send(result);
                 false
             }
@@ -619,11 +723,12 @@ impl Manager {
         match report {
             Report::Progress { id, progress, update } => {
                 let _ = tasks::set_progress(self.store.pool(), id, progress, now_ms()).await;
-                self.sink.emit(HostEvent::Progress {
-                    updates: vec![update],
-                });
+                if let Some(batch) = self.progress.push(update, self.progress_clock()) {
+                    self.sink.emit(batch);
+                }
             }
             Report::Completed { id, sha256 } => {
+                self.flush_progress();
                 self.running.remove(&id);
                 let row = self.row(id).await.ok();
                 let total = row.as_ref().and_then(|row| row.total_bytes);
@@ -647,11 +752,13 @@ impl Manager {
                 message,
                 retryable,
             } => {
+                self.flush_progress();
                 self.running.remove(&id);
                 self.record_failure(id, &message, retryable).await;
                 let _ = self.pump().await;
             }
             Report::Cancelled { id } => {
+                self.flush_progress();
                 self.running.remove(&id);
             }
         }

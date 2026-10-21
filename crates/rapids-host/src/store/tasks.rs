@@ -257,6 +257,15 @@ pub async fn by_status(pool: &SqlitePool, status: TaskStatus) -> Result<Vec<Task
         .map_err(|error| HostError::database("read tasks by status", error))
 }
 
+/// How many tasks sit in each state, for a queue summary. One query, so the
+/// numbers in one summary cannot come from two different moments.
+pub async fn counts(pool: &SqlitePool) -> Result<Vec<(String, i64)>, HostError> {
+    sqlx::query_as::<_, (String, i64)>("SELECT status, COUNT(*) FROM tasks GROUP BY status")
+        .fetch_all(pool)
+        .await
+        .map_err(|error| HostError::database("count tasks by status", error))
+}
+
 pub async fn count(pool: &SqlitePool) -> Result<i64, HostError> {
     sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
         .fetch_one(pool)

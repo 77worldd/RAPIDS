@@ -107,3 +107,124 @@ pub async fn get_string(pool: &SqlitePool, key: &str, fallback: &str) -> Result<
 pub fn encode_string(value: &str) -> String {
     serde_json::to_string(value).expect("a string always serializes to JSON")
 }
+
+/// The settings the host accepts, each with the bounds it is held to.
+///
+/// A name outside this list is rejected rather than written, so a typo in a
+/// frontend cannot quietly add a setting nothing reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Setting {
+    MaxParallel,
+    /// How many connections the whole app may hold open at once, across every
+    /// running download. It is a budget, not a field of any one request: the
+    /// engine refuses a per-task connection count above
+    /// [`crate::manager::MAX_CONNECTIONS_PER_TASK`], so the task plan is
+    /// derived from this budget and clamped to that ceiling.
+    MaxConnectionsTotal,
+    GlobalSpeedLimit,
+    ResumeOnStart,
+    RetryMaxAttempts,
+    RetryBaseMs,
+    RetryCapMs,
+    DefaultDestDir,
+}
+
+impl Setting {
+    /// Every setting, for a reader that needs the set rather than one entry.
+    pub const ALL: [Self; 8] = [
+        Self::MaxParallel,
+        Self::MaxConnectionsTotal,
+        Self::GlobalSpeedLimit,
+        Self::ResumeOnStart,
+        Self::RetryMaxAttempts,
+        Self::RetryBaseMs,
+        Self::RetryCapMs,
+        Self::DefaultDestDir,
+    ];
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            MAX_PARALLEL => Some(Self::MaxParallel),
+            MAX_CONNECTIONS_TOTAL => Some(Self::MaxConnectionsTotal),
+            GLOBAL_SPEED_LIMIT => Some(Self::GlobalSpeedLimit),
+            RESUME_ON_START => Some(Self::ResumeOnStart),
+            RETRY_MAX_ATTEMPTS => Some(Self::RetryMaxAttempts),
+            RETRY_BASE_MS => Some(Self::RetryBaseMs),
+            RETRY_CAP_MS => Some(Self::RetryCapMs),
+            DEFAULT_DEST_DIR => Some(Self::DefaultDestDir),
+            _ => None,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::MaxParallel => MAX_PARALLEL,
+            Self::MaxConnectionsTotal => MAX_CONNECTIONS_TOTAL,
+            Self::GlobalSpeedLimit => GLOBAL_SPEED_LIMIT,
+            Self::ResumeOnStart => RESUME_ON_START,
+            Self::RetryMaxAttempts => RETRY_MAX_ATTEMPTS,
+            Self::RetryBaseMs => RETRY_BASE_MS,
+            Self::RetryCapMs => RETRY_CAP_MS,
+            Self::DefaultDestDir => DEFAULT_DEST_DIR,
+        }
+    }
+
+    /// Checks a caller's value and returns the text to store.
+    ///
+    /// The bounds are the ones the rest of the host already enforces or that
+    /// keep a value usable: a parallel limit of zero would stall the queue
+    /// forever, and a base retry delay of a day is indistinguishable from a
+    /// broken app.
+    pub fn encode(self, value: &serde_json::Value) -> Result<String, HostError> {
+        use serde_json::Value;
+
+        match self {
+            Self::MaxParallel => number(value, self, 1, 32),
+            Self::MaxConnectionsTotal => number(value, self, 1, 128),
+            Self::RetryMaxAttempts => number(value, self, 0, 10),
+            Self::RetryBaseMs => number(value, self, 100, 3_600_000),
+            Self::RetryCapMs => number(value, self, 100, 86_400_000),
+            Self::GlobalSpeedLimit => match value {
+                Value::Null => Ok("null".to_string()),
+                // Below a kilobyte per second a transfer looks hung.
+                _ => number(value, self, 1_024, 1_073_741_824),
+            },
+            Self::ResumeOnStart => match value {
+                Value::Bool(flag) => Ok(flag.to_string()),
+                other => Err(HostError::invalid(format!(
+                    "{} must be true or false, not {other}",
+                    self.key()
+                ))),
+            },
+            Self::DefaultDestDir => match value {
+                Value::String(text) => Ok(encode_string(text)),
+                other => Err(HostError::invalid(format!(
+                    "{} must be a folder path, not {other}",
+                    self.key()
+                ))),
+            },
+        }
+    }
+}
+
+/// Validates an integer setting against an inclusive range.
+fn number(
+    value: &serde_json::Value,
+    setting: Setting,
+    lowest: i64,
+    highest: i64,
+) -> Result<String, HostError> {
+    let Some(integer) = value.as_i64() else {
+        return Err(HostError::invalid(format!(
+            "{} must be a whole number, not {value}",
+            setting.key()
+        )));
+    };
+    if !(lowest..=highest).contains(&integer) {
+        return Err(HostError::invalid(format!(
+            "{} must be between {lowest} and {highest}, not {integer}",
+            setting.key()
+        )));
+    }
+    Ok(integer.to_string())
+}

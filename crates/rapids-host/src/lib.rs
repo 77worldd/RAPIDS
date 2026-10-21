@@ -6,13 +6,16 @@
 //! [`EventSink`] trait, which the adapter implements and tests record, and
 //! every behaviour is exercised headless in this crate's own tests.
 
+pub mod api;
 pub mod error;
 pub mod events;
 pub mod manager;
+pub mod progress;
 mod runner;
 pub mod scheduler;
 pub mod store;
 
+pub use api::{Host, QueueCounts, ScheduleInput, ScheduleView, Settings};
 pub use error::HostError;
 pub use events::{EventSink, HostEvent, NullSink, ProgressUpdate, RecordingSink, TaskView};
 pub use manager::{AddRequest, ManagerHandle};
