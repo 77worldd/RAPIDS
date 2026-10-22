@@ -137,6 +137,24 @@ export function dismissSniffInbox(current: SniffInbox): SniffInbox {
   return { ...current, candidates: [], dismissed: true };
 }
 
+/** Selection prepares the existing add form; detection never starts a task. */
+export function selectSniffCandidate(
+  current: SniffInbox,
+  candidate: SniffCandidate,
+): { readonly inbox: SniffInbox; readonly url: string | null } {
+  if (
+    current.dismissed ||
+    current.session !== candidate.session ||
+    current.pageUrl !== candidate.pageUrl ||
+    !current.candidates.some(
+      (item) => item.url === candidate.url && item.source === candidate.source,
+    )
+  ) {
+    return { inbox: current, url: null };
+  }
+  return { inbox: dismissSniffInbox(current), url: candidate.url };
+}
+
 /** The full signed URL stays in memory for selection; never show its query. */
 export function sniffCandidateLabel(candidate: SniffCandidate): string {
   const url = new URL(candidate.url);

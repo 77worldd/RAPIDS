@@ -9,10 +9,19 @@ const FIELD =
   "h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-[13px] text-zinc-100 outline-none transition-colors duration-150 focus:border-emerald-500";
 const LABEL = "mb-1.5 block text-[12px] font-medium text-zinc-300";
 
-export function AddDownloadDialog({ onClose }: { readonly onClose: () => void }) {
+export function AddDownloadDialog({
+  onClose,
+  initialUrl,
+}: {
+  readonly onClose: () => void;
+  readonly initialUrl?: string;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const inFlight = useRef(false);
-  const [draft, setDraft] = useState<AddDraft>(createAddDraft);
+  const [draft, setDraft] = useState<AddDraft>(() => ({
+    ...createAddDraft(),
+    url: initialUrl ?? "",
+  }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dispatch = useStoreDispatch();
