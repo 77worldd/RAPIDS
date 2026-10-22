@@ -1,6 +1,7 @@
 mod adapter;
 mod commands;
 mod platform;
+mod sniff;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,6 +11,7 @@ pub fn run() {
             commands::app_version,
             commands::tasks_list,
             commands::task_add,
+            commands::sniff_open,
             commands::task_pause,
             commands::task_resume,
             commands::task_retry,

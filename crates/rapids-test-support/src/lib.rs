@@ -4,6 +4,8 @@
 //! precisely: per-connection throttling, early disconnects, range support
 //! that can be toggled, mutable validators, and a full request log.
 
+pub mod media_page;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
