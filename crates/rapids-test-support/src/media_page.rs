@@ -347,7 +347,12 @@ mod tests {
         );
 
         let clean = MediaPageServer::start();
-        get(&clean, "/trailer.mp4", "User-Agent: rapids/0.1.0\r\n", "GET");
+        get(
+            &clean,
+            "/trailer.mp4",
+            "User-Agent: rapids/0.1.0\r\n",
+            "GET",
+        );
         let (head, _) = get(&clean, "/assert-no-engine-cookie", "", "GET");
         assert!(head.starts_with("HTTP/1.1 204"));
     }

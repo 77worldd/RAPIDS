@@ -28,7 +28,7 @@ enum Source {
     Navigation,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Candidate {
     session: u64,
