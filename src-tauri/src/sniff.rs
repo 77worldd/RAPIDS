@@ -24,7 +24,7 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 enum Source {
     Video,
     #[serde(rename = "videoSource")]
-    SourceTag,
+    VideoSubTag,
     Link,
     Navigation,
 }
