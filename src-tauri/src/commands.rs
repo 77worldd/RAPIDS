@@ -8,7 +8,7 @@ use rapids_host::api::{QueueCounts, ScheduleView, Settings};
 use rapids_host::events::TaskView;
 use rapids_host::wire::{ScheduleCreateInput, TaskAddInput};
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::adapter::AdapterState;
 
@@ -60,6 +60,11 @@ pub async fn task_add(
     };
     let request = request.into_request(fallback_dir).map_err(message)?;
     state.host.task_add(request).await.map_err(message)
+}
+
+#[tauri::command]
+pub async fn sniff_open(app: AppHandle, window: WebviewWindow, url: String) -> Result<(), String> {
+    crate::sniff::open(&app, &window, &url)
 }
 
 #[tauri::command]
