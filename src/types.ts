@@ -58,6 +58,16 @@ export type HostEvent =
 
 export type StoreStatus = "loading" | "ready" | "failed";
 
+export type SniffSource = "video" | "videoSource" | "link" | "navigation";
+
+/** An in-memory suggestion from the inspector, not a download task. */
+export interface SniffCandidate {
+  readonly session: number;
+  readonly pageUrl: string;
+  readonly url: string;
+  readonly source: SniffSource;
+}
+
 export interface AppInfo {
   readonly name: string;
   readonly version: string;

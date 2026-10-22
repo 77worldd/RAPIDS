@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { toInspectorUrl, toSniffCandidate } from "./sniff";
 import type {
   AppInfo,
   HostEvent,
@@ -9,6 +10,7 @@ import type {
   ScheduleView,
   SettingName,
   Settings,
+  SniffCandidate,
   TagId,
   Task,
   TaskAddInput,
@@ -180,6 +182,11 @@ export function addTask(request: TaskAddInput): Promise<Task> {
   return checked("task_add", isTask, { request });
 }
 
+export async function openSniffInspector(input: string): Promise<void> {
+  const url = toInspectorUrl(input);
+  await send("sniff_open", { url });
+}
+
 export function pauseTask(id: number): Promise<void> {
   return send("task_pause", { id });
 }
@@ -300,6 +307,20 @@ export async function subscribeHostEvents(
     for (const off of unlisten) off();
     throw error;
   }
+}
+
+export async function subscribeSniffCandidates(
+  onCandidate: (candidate: SniffCandidate) => void,
+  onError: (error: Error) => void,
+): Promise<UnlistenFn> {
+  return listen<unknown>("rapids://sniff-candidate", (message) => {
+    const candidate = toSniffCandidate(message.payload);
+    if (candidate === null) {
+      onError(new Error("The inspector sent an invalid media candidate."));
+    } else {
+      onCandidate(candidate);
+    }
+  });
 }
 
 export function describeError(error: unknown): string {

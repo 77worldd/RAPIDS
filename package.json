@@ -8,6 +8,7 @@
     "build": "npm run typecheck && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:add-draft": "node --experimental-strip-types --test tests/add-draft.test.mjs",
+    "test:sniff": "node --experimental-strip-types --test tests/sniff.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "gate:content": "node scripts/content-gate.mjs",
