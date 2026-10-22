@@ -99,6 +99,26 @@ pub struct RateLimiter {
     changed: Notify,
 }
 
+/// A chunk may claim available credit before the rest has accrued. Return
+/// that credit if its wait is cancelled or the future is dropped.
+struct PendingClaim<'a> {
+    limiter: &'a RateLimiter,
+    bytes: u64,
+}
+
+impl Drop for PendingClaim<'_> {
+    fn drop(&mut self) {
+        if self.bytes == 0 {
+            return;
+        }
+        {
+            let mut bucket = self.limiter.lock();
+            bucket.tokens = bucket.tokens.saturating_add(self.bytes).min(bucket.capacity);
+        }
+        self.limiter.changed.notify_waiters();
+    }
+}
+
 impl RateLimiter {
     /// A limiter for `rate_bps` bytes per second; `None` or `0` is unlimited.
     pub fn new(rate_bps: Option<u64>) -> Self {
@@ -145,6 +165,10 @@ impl RateLimiter {
         F: FnMut() -> bool,
     {
         let mut remaining = bytes;
+        let mut claim = PendingClaim {
+            limiter: self,
+            bytes: 0,
+        };
         while remaining > 0 {
             if !keep_going() {
                 return false;
@@ -152,16 +176,22 @@ impl RateLimiter {
             let wait = {
                 let mut bucket = self.lock();
                 let Some(rate) = bucket.rate_bps else {
+                    claim.bytes = 0;
                     return true;
                 };
                 bucket.refill(Instant::now(), rate);
-                let slice = remaining.min(bucket.capacity);
-                if bucket.tokens >= slice {
-                    bucket.tokens -= slice;
-                    remaining -= slice;
-                    continue;
+                // Reserve even a partial refill. Under contention, another
+                // waiter cannot take those bytes and force this one to sleep
+                // for a whole chunk again on a coarse timer.
+                let paid = remaining.min(bucket.tokens);
+                bucket.tokens -= paid;
+                remaining -= paid;
+                claim.bytes += paid;
+                if remaining == 0 {
+                    claim.bytes = 0;
+                    return true;
                 }
-                payment_time(slice - bucket.tokens, rate).min(MAX_WAIT_SLICE)
+                payment_time(remaining.min(bucket.capacity), rate).min(MAX_WAIT_SLICE)
             };
             tokio::select! {
                 _ = sleep(wait) => {}
@@ -222,7 +252,9 @@ impl RateLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Waker};
 
     #[test]
     fn burst_is_a_quarter_second_with_a_floor() {
@@ -315,5 +347,22 @@ mod tests {
         // fetch_add reports the previous count: the callback answers continue
         // twice, and the third call is the one that says stop.
         assert_eq!(asked.load(Ordering::Relaxed), 3);
+        assert_eq!(limiter.lock().tokens, MIN_BURST_BYTES);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_partial_claim_refunds_its_credit() {
+        let limiter = RateLimiter::new(Some(64 * 1024));
+        assert!(limiter.acquire_while(12 * 1024, || true).await);
+        assert_eq!(limiter.lock().tokens, 4 * 1024);
+
+        let mut waiting = Box::pin(limiter.acquire_while(8 * 1024, || true));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(waiting.as_mut().poll(&mut context).is_pending());
+        assert_eq!(limiter.lock().tokens, 0, "the waiter claimed 4 KiB");
+
+        drop(waiting);
+        assert_eq!(limiter.lock().tokens, 4 * 1024, "unused credit returned");
+        assert!(limiter.acquire_while(4 * 1024, || true).await);
     }
 }

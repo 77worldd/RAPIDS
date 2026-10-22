@@ -1,5 +1,7 @@
+use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
+use std::task::{Context, Waker};
 use std::time::{Duration, Instant};
 
 use rapids_engine::{
@@ -121,6 +123,37 @@ async fn two_downloads_debit_one_shared_global_bucket() {
     assert!(
         elapsed <= Duration::from_millis(500),
         "a 16 KiB refill at 64 KiB/s took {elapsed:?} of paused clock time"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_partial_global_payment_is_reserved_under_contention() {
+    let global = Arc::new(RateLimiter::new(Some(64 * 1024)));
+    let first = RateLimits::compose(Some(Arc::clone(&global)), None);
+    let second = RateLimits::compose(Some(Arc::clone(&global)), None);
+    assert!(first.acquire_while(16 * 1024, || true).await);
+    tokio::time::advance(Duration::from_millis(125)).await;
+
+    let started = tokio::time::Instant::now();
+    let mut older = Box::pin(first.acquire_while(16 * 1024, || true));
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(older.as_mut().poll(&mut context).is_pending());
+    let mut newer = Box::pin(second.acquire_while(8 * 1024, || true));
+    assert!(
+        newer.as_mut().poll(&mut context).is_pending(),
+        "the second waiter cannot take the first waiter's partial payment"
+    );
+
+    let (one, two) = tokio::join!(older, newer);
+    assert!(one && two);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(250),
+        "two claims spent more than the shared bucket earned in {elapsed:?}"
+    );
+    assert!(
+        elapsed <= Duration::from_millis(500),
+        "shared claims stalled despite sufficient credit in {elapsed:?}"
     );
 }
 
