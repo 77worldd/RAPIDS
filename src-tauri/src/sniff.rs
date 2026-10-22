@@ -99,9 +99,7 @@ fn parse_title(title: &str, session: u64) -> Option<Report> {
     }
     let payload = title.strip_prefix(TITLE_PREFIX)?;
     let report: TitleReport = serde_json::from_str(payload).ok()?;
-    if report.version != VERSION
-        || report.session != session
-        || report.source == Source::Navigation
+    if report.version != VERSION || report.session != session || report.source == Source::Navigation
     {
         return None;
     }
@@ -386,6 +384,7 @@ mod tests {
     const PAGE: &str = "http://127.0.0.1:53001/page.html";
     const SPOOF: &str = "http://127.0.0.1:53001/spoof.html";
     const MEDIA: &str = "http://127.0.0.1:53001/clip.mp4";
+    const TRAILER: &str = "http://127.0.0.1:53001/trailer.mp4";
 
     fn title(session: u64, page: &str, url: &str, source: &str) -> String {
         format!(
@@ -398,6 +397,19 @@ mod tests {
                 "source": source,
             })
         )
+    }
+
+    #[test]
+    fn link_selectors_are_valid_in_both_generated_scripts() {
+        let report = Report {
+            page: Url::parse(PAGE).unwrap(),
+            url: Url::parse(TRAILER).unwrap(),
+            source: Source::Link,
+        };
+        for script in [initialization_script(1), verification_script(&report)] {
+            assert!(script.contains("document.querySelectorAll(\"a[href]\")"));
+            assert!(!script.contains("aref]"));
+        }
     }
 
     #[test]
@@ -438,8 +450,16 @@ mod tests {
         let report = inspection.report(&forged, &page).unwrap();
         assert!(inspection.accept(&report, &page, false).is_none());
         assert!(inspection.seen.is_empty());
-        assert!(inspection.report(&title(2, SPOOF, MEDIA, "link"), &page).is_none());
-        assert!(inspection.report(&title(1, MEDIA, MEDIA, "link"), &page).is_none());
+        assert!(
+            inspection
+                .report(&title(2, SPOOF, MEDIA, "link"), &page)
+                .is_none()
+        );
+        assert!(
+            inspection
+                .report(&title(1, MEDIA, MEDIA, "link"), &page)
+                .is_none()
+        );
         for _ in inspection.reports..MAX_REPORTS {
             let _ = inspection.report(&forged, &page);
         }
@@ -452,10 +472,16 @@ mod tests {
         let media = Url::parse(MEDIA).unwrap();
         let mut inspection = Inspection::new(3);
         assert!(inspection.navigate(&page).is_none());
-        let report = inspection.report(&title(3, PAGE, MEDIA, "video"), &page).unwrap();
+        let report = inspection
+            .report(&title(3, PAGE, MEDIA, "video"), &page)
+            .unwrap();
         assert!(inspection.accept(&report, &page, true).is_some());
         assert!(inspection.accept(&report, &page, true).is_none());
-        assert!(inspection.report(&title(3, PAGE, MEDIA, "video"), &media).is_none());
+        assert!(
+            inspection
+                .report(&title(3, PAGE, MEDIA, "video"), &media)
+                .is_none()
+        );
         assert!(inspection.navigate(&media).is_some());
         assert!(inspection.navigate(&media).is_some());
         assert!(parse_title(&title(3, PAGE, "http://127.0.0.1/stream.m3u8", "video"), 3).is_none());
@@ -465,10 +491,14 @@ mod tests {
         inspection.navigate(&page);
         for index in 0..MAX_CANDIDATES {
             let url = format!("http://127.0.0.1:53001/{index}.mp4");
-            let report = inspection.report(&title(3, PAGE, &url, "video"), &page).unwrap();
+            let report = inspection
+                .report(&title(3, PAGE, &url, "video"), &page)
+                .unwrap();
             assert!(inspection.accept(&report, &page, true).is_some());
         }
-        let extra = inspection.report(&title(3, PAGE, MEDIA, "video"), &page).unwrap();
+        let extra = inspection
+            .report(&title(3, PAGE, MEDIA, "video"), &page)
+            .unwrap();
         assert!(inspection.accept(&extra, &page, true).is_none());
     }
 }

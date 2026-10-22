@@ -12,7 +12,8 @@ const MEDIA_SIZE: usize = 256 * 1024;
 const MEDIA_PAGE: &str = r#"<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Media inspection</title></head>
 <body><video controls preload="metadata" src="/clip.mp4"></video>
-<a href="/clip.mp4">Open clip</a><a href="/stream.m3u8">Streaming manifest</a></body></html>"#;
+<a href="/clip.mp4">Open clip</a><a href="/trailer.mp4">Open trailer</a>
+<a href="/stream.m3u8">Streaming manifest</a></body></html>"#;
 const EMPTY_PAGE: &str = r#"<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>No media</title></head>
 <body><p>No direct media on this page.</p></body></html>"#;
@@ -136,13 +137,16 @@ fn parse_range(header: &str) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
-fn media_response(stream: &mut TcpStream, method: &str, range: Option<&str>) {
-    let headers = concat!(
-        "Content-Type: video/mp4\r\n",
-        "Content-Disposition: inline; filename=\"clip.mp4\"\r\n",
-        "Accept-Ranges: bytes\r\n",
-        "ETag: \"sniff-v1\"\r\n",
-        "Last-Modified: Wed, 21 Oct 2026 07:28:00 GMT\r\n",
+fn media_response(stream: &mut TcpStream, method: &str, range: Option<&str>, filename: &str) {
+    let headers = format!(
+        concat!(
+            "Content-Type: video/mp4\r\n",
+            "Content-Disposition: inline; filename=\"{}\"\r\n",
+            "Accept-Ranges: bytes\r\n",
+            "ETag: \"sniff-v1\"\r\n",
+            "Last-Modified: Wed, 21 Oct 2026 07:28:00 GMT\r\n",
+        ),
+        filename
     );
     let selected = range.and_then(parse_range);
     let (status, start, end, content_range) = match selected {
@@ -165,8 +169,16 @@ fn media_response(stream: &mut TcpStream, method: &str, range: Option<&str>) {
         ),
         None => ("200 OK", 0, MEDIA_SIZE, String::new()),
     };
-    let body: Vec<u8> = (start..end).map(|index| super::byte_at(index as u64)).collect();
-    response(stream, status, &(headers.to_owned() + &content_range), &body, method);
+    let body: Vec<u8> = (start..end)
+        .map(|index| super::byte_at(index as u64))
+        .collect();
+    response(
+        stream,
+        status,
+        &(headers.to_owned() + &content_range),
+        &body,
+        method,
+    );
 }
 
 fn serve(mut stream: TcpStream, requests: &Mutex<Vec<MediaRequest>>) {
@@ -197,7 +209,9 @@ fn serve(mut stream: TcpStream, requests: &Mutex<Vec<MediaRequest>>) {
     if path == "/assert-no-engine-cookie" {
         let log = requests.lock().unwrap();
         let mut engine_gets = log.iter().filter(|request| {
-            request.engine_client && request.method == "GET" && request.path == "/clip.mp4"
+            request.engine_client
+                && request.method == "GET"
+                && matches!(request.path.as_str(), "/clip.mp4" | "/trailer.mp4")
         });
         let first = engine_gets.next();
         if first.is_some_and(|request| !request.cookie_present)
@@ -234,7 +248,8 @@ fn serve(mut stream: TcpStream, requests: &Mutex<Vec<MediaRequest>>) {
             );
             response(&mut stream, "200 OK", headers, body.as_bytes(), method);
         }
-        "/clip.mp4" => media_response(&mut stream, method, range),
+        "/clip.mp4" => media_response(&mut stream, method, range, "clip.mp4"),
+        "/trailer.mp4" => media_response(&mut stream, method, range, "trailer.mp4"),
         _ => response(&mut stream, "404 Not Found", "", &[], method),
     }
 }
@@ -248,7 +263,9 @@ mod tests {
         let address = address.strip_prefix("http://").unwrap();
         let host = address.split('/').next().unwrap();
         let mut stream = TcpStream::connect(host).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         write!(
             stream,
             "{method} {path} HTTP/1.1\r\nHost: {host}\r\n{headers}Connection: close\r\n\r\n"
@@ -256,7 +273,10 @@ mod tests {
         .unwrap();
         let mut response = Vec::new();
         stream.read_to_end(&mut response).unwrap();
-        let split = response.windows(4).position(|bytes| bytes == b"\r\n\r\n").unwrap();
+        let split = response
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .unwrap();
         let head = String::from_utf8(response[..split].to_vec()).unwrap();
         (head, response[split + 4..].to_vec())
     }
@@ -282,7 +302,26 @@ mod tests {
         for (index, byte) in full.iter().enumerate() {
             assert_eq!(*byte, super::super::byte_at(index as u64));
         }
-        assert_eq!(server.expected_sha256(), super::super::expected_sha256(262144));
+        assert_eq!(
+            server.expected_sha256(),
+            super::super::expected_sha256(262144)
+        );
+    }
+
+    #[test]
+    fn a_plain_link_reaches_a_distinct_ranged_media_target() {
+        let server = MediaPageServer::start();
+        let (_, page) = get(&server, "/page.html", "", "GET");
+        let html = String::from_utf8(page).unwrap();
+        assert!(html.contains("<a href=\"/trailer.mp4\">Open trailer</a>"));
+        assert_eq!(html.matches("/trailer.mp4").count(), 1);
+
+        let (head, body) = get(&server, "/trailer.mp4", "Range: bytes=100-109\r\n", "GET");
+        assert!(head.starts_with("HTTP/1.1 206"));
+        assert!(head.contains("Content-Range: bytes 100-109/262144"));
+        assert!(head.contains("filename=\"trailer.mp4\""));
+        let expected: Vec<u8> = (100..110).map(super::super::byte_at).collect();
+        assert_eq!(body, expected);
     }
 
     #[test]
@@ -300,10 +339,15 @@ mod tests {
         get(&server, "/clip.mp4", headers, "GET");
         let (head, _) = get(&server, "/assert-no-engine-cookie", "", "GET");
         assert!(head.starts_with("HTTP/1.1 409"));
-        assert!(server.requests().iter().any(|request| request.cookie_present));
+        assert!(
+            server
+                .requests()
+                .iter()
+                .any(|request| request.cookie_present)
+        );
 
         let clean = MediaPageServer::start();
-        get(&clean, "/clip.mp4", "User-Agent: rapids/0.1.0\r\n", "GET");
+        get(&clean, "/trailer.mp4", "User-Agent: rapids/0.1.0\r\n", "GET");
         let (head, _) = get(&clean, "/assert-no-engine-cookie", "", "GET");
         assert!(head.starts_with("HTTP/1.1 204"));
     }
