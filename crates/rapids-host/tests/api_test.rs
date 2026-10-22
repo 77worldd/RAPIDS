@@ -655,7 +655,7 @@ async fn app_wide_limits_round_trip_through_restart_and_change_live() {
 }
 
 #[tokio::test]
-async fn two_concurrent_tasks_obey_one_global_rate_within_fifteen_percent() {
+async fn two_concurrent_tasks_obey_one_global_rate_band() {
     let total = 3 * 1024 * 1024u64;
     let rate = 512 * 1024u64;
     let server = TestServer::start(options(total));
@@ -706,6 +706,7 @@ async fn two_concurrent_tasks_obey_one_global_rate_within_fifteen_percent() {
     let elapsed = started.elapsed();
     let measured = (2 * total) as f64 / elapsed.as_secs_f64();
     let ratio = measured / rate as f64;
+    println!("aggregate rate: {measured:.0} B/s in {elapsed:?}, ratio: {ratio:.3}x");
     // At 512 KiB/s, each ~16 KiB bucket payment waits ~31.25 ms. Windows'
     // coarse timer and per-chunk I/O yielded 0.509-0.557x in three solo runs
     // without suite contention; Linux ran near 1.0x. The 0.40x floor keeps
