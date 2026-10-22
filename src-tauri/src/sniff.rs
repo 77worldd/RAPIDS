@@ -23,7 +23,8 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 #[serde(rename_all = "camelCase")]
 enum Source {
     Video,
-    VideoSource,
+    #[serde(rename = "videoSource")]
+    SourceTag,
     Link,
     Navigation,
 }
