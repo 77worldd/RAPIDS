@@ -113,7 +113,10 @@ impl Drop for PendingClaim<'_> {
         }
         {
             let mut bucket = self.limiter.lock();
-            bucket.tokens = bucket.tokens.saturating_add(self.bytes).min(bucket.capacity);
+            bucket.tokens = bucket
+                .tokens
+                .saturating_add(self.bytes)
+                .min(bucket.capacity);
         }
         self.limiter.changed.notify_waiters();
     }
