@@ -2,7 +2,7 @@
 //! says. The runner owns no state of its own — every decision belongs to the
 //! manager, so there is exactly one writer.
 
-use rapids_engine::{spawn_download, DownloadHandle, DownloadSpec, EngineConfig, EngineEvent};
+use rapids_engine::{DownloadHandle, DownloadSpec, EngineConfig, EngineEvent, spawn_download};
 use tokio::sync::mpsc;
 
 use crate::error::HostError;
@@ -45,9 +45,10 @@ pub(crate) fn start(
     config: EngineConfig,
     reports: mpsc::Sender<Report>,
 ) -> Result<DownloadHandle, HostError> {
-    let (handle, mut events) = spawn_download(spec, config).map_err(|error| HostError::Invalid {
-        reason: error.to_string(),
-    })?;
+    let (handle, mut events) =
+        spawn_download(spec, config).map_err(|error| HostError::Invalid {
+            reason: error.to_string(),
+        })?;
 
     tokio::spawn(async move {
         while let Some(event) = events.recv().await {
@@ -72,16 +73,19 @@ pub(crate) fn start(
                         eta_seconds: progress.eta_seconds,
                         total_bytes: progress.total_bytes,
                     };
-                    let _ = reports.send(Report::Progress { id, progress, update }).await;
+                    let _ = reports
+                        .send(Report::Progress {
+                            id,
+                            progress,
+                            update,
+                        })
+                        .await;
                 }
                 EngineEvent::Completed { sha256, .. } => {
                     let _ = reports.send(Report::Completed { id, sha256 }).await;
                     break;
                 }
-                EngineEvent::Failed {
-                    message,
-                    retryable,
-                } => {
+                EngineEvent::Failed { message, retryable } => {
                     let _ = reports
                         .send(Report::Failed {
                             id,
@@ -95,6 +99,9 @@ pub(crate) fn start(
                     let _ = reports.send(Report::Cancelled { id }).await;
                     break;
                 }
+                // A host shutdown leaves the row in place. Startup requeues
+                // it; the engine's sidecar decides which bytes may resume.
+                EngineEvent::Stopped => break,
                 EngineEvent::StateChanged { .. } | EngineEvent::Retrying { .. } => {}
             }
         }

@@ -1,14 +1,19 @@
 import { viewLabel } from "../config/navigation";
+import { TaskList } from "../components/tasks/TaskList";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { selectVisibleTasks } from "../state/selectors";
-import { useStoreDispatch, useStoreState } from "../state/StoreProvider";
+import {
+  useRefreshTasks,
+  useStoreDispatch,
+  useStoreState,
+} from "../state/StoreProvider";
 import type { ViewId } from "../types";
 
 function emptyMessageFor(viewId: ViewId): string {
   switch (viewId) {
     case "all":
-      return "No downloads yet — add a URL to start your first download.";
+      return "No downloads yet.";
     case "running":
       return "Nothing is downloading right now.";
     case "paused":
@@ -20,7 +25,7 @@ function emptyMessageFor(viewId: ViewId): string {
     case "waiting":
       return "Nothing is waiting to start.";
     case "finished":
-      return "Finished schedules collect here.";
+      return "Finished downloads collect here.";
     default:
       return `No ${viewLabel(viewId)} downloads yet.`;
   }
@@ -31,7 +36,7 @@ function TaskListSkeleton() {
     <div
       role="status"
       aria-busy="true"
-      aria-label="Counting downloads"
+      aria-label="Loading downloads"
       className="space-y-2 p-4"
     >
       {Array.from({ length: 6 }, (_, index) => (
@@ -49,31 +54,76 @@ function TaskListSkeleton() {
   );
 }
 
+function Notice() {
+  const { notice } = useStoreState();
+  const dispatch = useStoreDispatch();
+  if (notice === null) return null;
+
+  return (
+    <div role="alert" className="flex items-center gap-3 border-b border-red-900/60 bg-red-950/40 px-4 py-2 text-[12px] text-red-200">
+      <span className="min-w-0 flex-1 truncate" title={notice}>
+        {notice}
+      </span>
+      <button
+        type="button"
+        className="rounded px-1.5 text-[11px] text-red-300 hover:bg-red-900/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-300"
+        onClick={() => {
+          dispatch({ type: "notice/clear" });
+        }}
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 export function TasksView() {
   const { status, tasks, viewId, query } = useStoreState();
   const dispatch = useStoreDispatch();
+  const refresh = useRefreshTasks();
 
   if (status === "loading") {
-    return <TaskListSkeleton />;
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <Notice />
+        <TaskListSkeleton />
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <Notice />
+        <EmptyState
+          message="The download service is not answering, so the list cannot be shown."
+          action={{ label: "Try again", onClick: refresh }}
+        />
+      </div>
+    );
   }
 
   const visible = selectVisibleTasks(tasks, viewId, query);
-
-  if (visible.length === 0) {
-    if (query.trim() !== "") {
-      return (
-        <EmptyState
-          message={`No downloads match “${query.trim()}”.`}
-          action={{
-            label: "Clear search",
-            onClick: () => dispatch({ type: "search/set", query: "" }),
-          }}
-        />
-      );
-    }
-    return <EmptyState message={emptyMessageFor(viewId)} action={null} />;
-  }
-
-  // Task rows render here once the engine feeds the live task list.
-  return null;
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <Notice />
+      {visible.length === 0 ? (
+        query.trim() !== "" ? (
+          <EmptyState
+            message={`No downloads match “${query.trim()}”.`}
+            action={{
+              label: "Clear search",
+              onClick: () => {
+                dispatch({ type: "search/set", query: "" });
+              },
+            }}
+          />
+        ) : (
+          <EmptyState message={emptyMessageFor(viewId)} action={null} />
+        )
+      ) : (
+        <TaskList tasks={visible} />
+      )}
+    </div>
+  );
 }

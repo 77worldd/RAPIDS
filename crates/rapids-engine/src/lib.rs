@@ -13,6 +13,7 @@ mod hash;
 mod http;
 
 pub mod config;
+pub mod connections;
 pub mod error;
 pub mod events;
 pub mod manifest;
@@ -22,6 +23,7 @@ pub mod util;
 pub mod workspace;
 
 pub use config::EngineConfig;
+pub use connections::ConnectionBudget;
 pub use coordinator::{DownloadHandle, DownloadSpec, spawn_download};
 pub use error::EngineError;
 pub use events::{DownloadState, EngineEvent};

@@ -121,6 +121,61 @@ async fn the_queue_orders_by_priority_then_arrival() {
 }
 
 #[tokio::test]
+async fn a_future_high_priority_retry_does_not_block_due_work() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let store = Store::open(&dir.path().join("rapids.db"))
+        .await
+        .expect("open");
+    let pool = store.pool();
+    let now = now_ms();
+    let high = tasks::insert(pool, &task("https://example.com/high.bin", 10))
+        .await
+        .expect("high priority");
+    let low = tasks::insert(pool, &task("https://example.com/low.bin", 0))
+        .await
+        .expect("low priority");
+    let due_at = now + 5_000;
+    tasks::set_failure(
+        pool,
+        high,
+        TaskStatus::Queued,
+        "retry is waiting",
+        1,
+        Some(due_at),
+        now,
+    )
+    .await
+    .expect("defer high priority task");
+
+    let waiting: Vec<_> = tasks::waiting(pool)
+        .await
+        .expect("waiting order")
+        .iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(waiting, vec![high, low]);
+
+    let due_ids = |rows: Vec<rapids_host::store::TaskRow>| {
+        rows.into_iter().map(|row| row.id).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        due_ids(tasks::due(pool, now).await.expect("due now")),
+        vec![low]
+    );
+    assert_eq!(
+        due_ids(tasks::due(pool, due_at - 1).await.expect("before retry")),
+        vec![low]
+    );
+    assert_eq!(
+        due_ids(tasks::due(pool, due_at).await.expect("at retry")),
+        vec![high, low],
+        "a due retry resumes priority order"
+    );
+
+    store.close().await;
+}
+
+#[tokio::test]
 async fn an_interrupted_download_returns_to_the_queue() {
     let dir = tempfile::tempdir().expect("temp dir");
     let store = Store::open(&dir.path().join("rapids.db"))

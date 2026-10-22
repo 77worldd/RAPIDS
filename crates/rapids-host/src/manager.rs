@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rapids_engine::{DownloadHandle, DownloadSpec, EngineConfig, filename_from_url};
+use rapids_engine::{
+    ConnectionBudget, DownloadHandle, DownloadSpec, EngineConfig, RateLimiter, filename_from_url,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
@@ -22,10 +24,10 @@ use crate::runner::{self, Report};
 use crate::scheduler::{self, Clock, Window};
 use crate::store::settings;
 use crate::store::{
+    Outcome, Store,
     history::{self, NewHistory},
     schedules::{self, ScheduleRow},
     tasks::{self, NewTask, TaskCategory, TaskRow, TaskStatus},
-    Outcome, Store,
 };
 
 /// How often the manager looks at the clock. A second is fine-grained enough
@@ -33,10 +35,9 @@ use crate::store::{
 /// minute at most.
 const TICK: Duration = Duration::from_secs(1);
 
-/// The most connections one download may ask the engine for. The engine
-/// rejects anything outside 1..=32 as an invalid spec, and an invalid spec is
-/// not retryable, so a value above this would fail a task on its first
-/// attempt. Anything derived from a global budget is clamped to it here.
+/// The most workers one download may ask the engine for. It rejects a
+/// per-task plan outside 1..=32, so stored plans are clamped here. The
+/// separate app-wide budget governs active HTTP requests across all tasks.
 pub const MAX_CONNECTIONS_PER_TASK: u8 = 32;
 
 /// Everything a caller must supply to enqueue work.
@@ -167,7 +168,12 @@ impl ManagerHandle {
 
     pub async fn reorder(&self, id: i64, priority: i64) -> Result<(), HostError> {
         let (reply, answer) = oneshot::channel();
-        self.send(Command::Reorder { id, priority, reply }).await?;
+        self.send(Command::Reorder {
+            id,
+            priority,
+            reply,
+        })
+        .await?;
         receive(answer).await
     }
 
@@ -197,8 +203,8 @@ impl ManagerHandle {
         receive(answer).await
     }
 
-    /// Parks every running download (the engine checkpoints on the way down),
-    /// then stops the manager task.
+    /// Checkpoints running downloads and releases their workspace locks,
+    /// then stops the manager task. Interrupted rows requeue on startup.
     pub async fn shutdown(&self) {
         let (reply, answer) = oneshot::channel();
         if self.send(Command::Shutdown { reply }).await.is_ok() {
@@ -207,9 +213,10 @@ impl ManagerHandle {
     }
 
     async fn send(&self, command: Command) -> Result<(), HostError> {
-        self.commands.send(command).await.map_err(|_| {
-            HostError::invalid("the download manager is no longer running")
-        })
+        self.commands
+            .send(command)
+            .await
+            .map_err(|_| HostError::invalid("the download manager is no longer running"))
     }
 }
 
@@ -248,6 +255,9 @@ struct Manager {
     /// True when the queue is paused: running downloads continue, nothing new
     /// starts.
     paused: bool,
+    /// One pair of live limits for every download this manager starts.
+    global_limiter: Arc<RateLimiter>,
+    connections: Arc<ConnectionBudget>,
     running: HashMap<i64, DownloadHandle>,
     reports: mpsc::Sender<Report>,
     report_rx: mpsc::Receiver<Report>,
@@ -278,6 +288,8 @@ pub fn spawn(
         started: Instant::now(),
         progress: ProgressBuffer::new(),
         paused: false,
+        global_limiter: Arc::new(RateLimiter::new(None)),
+        connections: Arc::new(ConnectionBudget::new(48)),
         running: HashMap::new(),
         reports: report_tx,
         report_rx,
@@ -335,6 +347,34 @@ impl Manager {
         self.pump().await
     }
 
+    /// Loads the two app-wide limits before admitting work, and updates the
+    /// same shared objects already held by running engines on every refresh.
+    async fn sync_limits(&self) -> Result<(), HostError> {
+        let pool = self.store.pool();
+        let total = settings::get_i64(pool, settings::MAX_CONNECTIONS_TOTAL, 48).await?;
+        if !(1..=128).contains(&total) {
+            return Err(HostError::invalid(
+                "max_connections_total must be between 1 and 128",
+            ));
+        }
+        let total = usize::try_from(total)
+            .map_err(|_| HostError::invalid("max_connections_total is out of range"))?;
+        let rate = match settings::get_optional_i64(pool, settings::GLOBAL_SPEED_LIMIT).await? {
+            None => None,
+            Some(value) => Some(
+                u64::try_from(value)
+                    .ok()
+                    .filter(|rate| (1_024..=1_073_741_824).contains(rate))
+                    .ok_or_else(|| {
+                        HostError::invalid("global_speed_limit must be between 1024 and 1073741824")
+                    })?,
+            ),
+        };
+        self.connections.set_limit(total);
+        self.global_limiter.set_rate(rate);
+        Ok(())
+    }
+
     /// Starts due work while there is room.
     ///
     /// A queued row can still be waiting for two reasons, and both are
@@ -342,6 +382,7 @@ impl Manager {
     /// and its window may not be open. Scheduled rows are never picked up —
     /// the tick moves them into the queue when their window opens.
     async fn pump(&mut self) -> Result<(), HostError> {
+        self.sync_limits().await?;
         if self.paused {
             return Ok(());
         }
@@ -349,10 +390,12 @@ impl Manager {
             .await
             .unwrap_or(3)
             .clamp(1, 32);
-        let max_parallel = usize::try_from(max_parallel).unwrap_or(3);
-        let schedules = schedules::list(self.store.pool())
-            .await
-            .unwrap_or_default();
+        // Each running task needs at least one usable slot. The engine's
+        // shared budget governs actual HTTP attempts within those tasks.
+        let max_parallel = usize::try_from(max_parallel)
+            .unwrap_or(3)
+            .min(self.connections.limit());
+        let schedules = schedules::list(self.store.pool()).await.unwrap_or_default();
         while self.running.len() < max_parallel {
             let due = tasks::due(self.store.pool(), now_ms()).await?;
             let mut next = None;
@@ -387,9 +430,7 @@ impl Manager {
     /// not something a clock should decide.
     async fn tick(&mut self) {
         let now = now_ms();
-        let schedules = schedules::list(self.store.pool())
-            .await
-            .unwrap_or_default();
+        let schedules = schedules::list(self.store.pool()).await.unwrap_or_default();
         if !schedules.is_empty() {
             self.reconcile_windows(now, &schedules).await;
         }
@@ -475,6 +516,8 @@ impl Manager {
             rate_limit_bps: row
                 .speed_limit_bps
                 .and_then(|value| u64::try_from(value).ok()),
+            shared_limiter: Some(Arc::clone(&self.global_limiter)),
+            connection_budget: Some(Arc::clone(&self.connections)),
             ..EngineConfig::default()
         };
 
@@ -529,7 +572,11 @@ impl Manager {
                 let _ = reply.send(result);
                 false
             }
-            Command::Reorder { id, priority, reply } => {
+            Command::Reorder {
+                id,
+                priority,
+                reply,
+            } => {
                 let result = self.reorder(id, priority).await;
                 let _ = reply.send(result);
                 false
@@ -612,14 +659,10 @@ impl Manager {
     }
 
     async fn pause(&mut self, id: i64) -> Result<(), HostError> {
-        let handle = self
-            .running
-            .get(&id)
-            .cloned()
-            .ok_or(HostError::NotFound {
-                entity: "running task",
-                id,
-            })?;
+        let handle = self.running.get(&id).cloned().ok_or(HostError::NotFound {
+            entity: "running task",
+            id,
+        })?;
         handle.pause().await;
         tasks::set_status(self.store.pool(), id, TaskStatus::Paused, now_ms()).await?;
         self.emit_changed(id).await;
@@ -721,7 +764,11 @@ impl Manager {
 
     async fn handle_report(&mut self, report: Report) {
         match report {
-            Report::Progress { id, progress, update } => {
+            Report::Progress {
+                id,
+                progress,
+                update,
+            } => {
                 let _ = tasks::set_progress(self.store.pool(), id, progress, now_ms()).await;
                 if let Some(batch) = self.progress.push(update, self.progress_clock()) {
                     self.sink.emit(batch);
@@ -732,15 +779,9 @@ impl Manager {
                 self.running.remove(&id);
                 let row = self.row(id).await.ok();
                 let total = row.as_ref().and_then(|row| row.total_bytes);
-                if tasks::mark_completed(
-                    self.store.pool(),
-                    id,
-                    total,
-                    sha256.as_deref(),
-                    now_ms(),
-                )
-                .await
-                .is_ok()
+                if tasks::mark_completed(self.store.pool(), id, total, sha256.as_deref(), now_ms())
+                    .await
+                    .is_ok()
                 {
                     self.record_history(id, Outcome::Completed).await;
                     self.emit_changed(id).await;
@@ -847,19 +888,31 @@ impl Manager {
     }
 
     async fn stop_all(&mut self) {
-        let handles: Vec<DownloadHandle> = self.running.drain().map(|(_, handle)| handle).collect();
+        // No new task may start while terminal reports from running ones land.
+        self.paused = true;
+        let handles: Vec<DownloadHandle> = self.running.values().cloned().collect();
         for handle in handles {
-            handle.pause().await;
+            let stop = handle.stop();
+            tokio::pin!(stop);
+            loop {
+                let report = tokio::select! {
+                    biased;
+                    _ = &mut stop => break,
+                    Some(report) = self.report_rx.recv() => report,
+                };
+                self.handle_report(report).await;
+            }
         }
+        while let Ok(report) = self.report_rx.try_recv() {
+            self.handle_report(report).await;
+        }
+        self.running.clear();
     }
 
     async fn row(&self, id: i64) -> Result<TaskRow, HostError> {
         tasks::get(self.store.pool(), id)
             .await?
-            .ok_or(HostError::NotFound {
-                entity: "task",
-                id,
-            })
+            .ok_or(HostError::NotFound { entity: "task", id })
     }
 
     async fn view(&self, id: i64) -> Result<TaskView, HostError> {

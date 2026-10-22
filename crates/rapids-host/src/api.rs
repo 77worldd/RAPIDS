@@ -14,7 +14,7 @@ use crate::events::TaskView;
 use crate::manager::{AddRequest, ManagerHandle};
 use crate::now_ms;
 use crate::store::schedules::{self, NewSchedule, ScheduleKind, ScheduleRow};
-use crate::store::{settings, tasks, Store};
+use crate::store::{Store, settings, tasks};
 
 /// Every setting, in the shape the frontend reads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -37,12 +37,8 @@ impl Settings {
     pub async fn load(pool: &sqlx::SqlitePool) -> Result<Self, HostError> {
         Ok(Self {
             max_parallel: settings::get_i64(pool, settings::MAX_PARALLEL, 3).await?,
-            max_connections_total: settings::get_i64(
-                pool,
-                settings::MAX_CONNECTIONS_TOTAL,
-                48,
-            )
-            .await?,
+            max_connections_total: settings::get_i64(pool, settings::MAX_CONNECTIONS_TOTAL, 48)
+                .await?,
             global_speed_limit: settings::get_optional_i64(pool, settings::GLOBAL_SPEED_LIMIT)
                 .await?,
             resume_on_start: settings::get_bool(pool, settings::RESUME_ON_START, true).await?,
@@ -173,7 +169,9 @@ impl Host {
         value: &serde_json::Value,
     ) -> Result<Settings, HostError> {
         let Some(setting) = settings::Setting::parse(name) else {
-            return Err(HostError::invalid(format!("there is no setting called {name}")));
+            return Err(HostError::invalid(format!(
+                "there is no setting called {name}"
+            )));
         };
         let encoded = setting.encode(value)?;
         settings::set(self.store.pool(), setting.key(), &encoded, now_ms()).await?;

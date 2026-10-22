@@ -44,8 +44,23 @@ pub(crate) async fn probe(
 
     let mut attempt = 0u32;
     loop {
+        // A probe may retry after a long backoff. Keep the shared slot only
+        // while this attempt makes its HEAD and range-check requests; the
+        // coordinator drops this future to stop a probe parked here.
+        let lease = if let Some(budget) = &config.connection_budget {
+            Some(
+                budget
+                    .acquire_while(|| true)
+                    .await
+                    .expect("an unconditional probe cannot decline its lease"),
+            )
+        } else {
+            None
+        };
         attempt += 1;
-        match probe_once(url, config, client).await {
+        let result = probe_once(url, config, client).await;
+        drop(lease);
+        match result {
             Ok(result) => return Ok(result),
             Err(ProbeFailure::Fatal(error)) => return Err(error),
             Err(ProbeFailure::Retry { reason, timed_out }) => {

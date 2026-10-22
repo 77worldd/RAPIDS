@@ -35,11 +35,8 @@ impl Harness {
         );
         let sink = Arc::new(RecordingSink::new());
         let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-        let (manager, join) = rapids_host::manager::spawn(
-            Arc::clone(&store),
-            sink_port,
-            Clock::utc(),
-        );
+        let (manager, join) =
+            rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
         Self {
             host: Host::new(Arc::clone(&store), manager.clone()),
             store,
@@ -95,6 +92,46 @@ impl Harness {
     async fn finish(self) {
         self.manager.shutdown().await;
         let _ = self.join.await;
+    }
+
+    async fn restart(self) -> Self {
+        let Self {
+            host,
+            store,
+            manager,
+            sink,
+            join,
+            downloads,
+            _dir,
+        } = self;
+        manager.shutdown().await;
+        join.await.expect("old manager stopped");
+        drop(host);
+        drop(manager);
+        drop(sink);
+        Arc::try_unwrap(store)
+            .unwrap_or_else(|_| panic!("old manager still holds the store"))
+            .close()
+            .await;
+
+        let store = Arc::new(
+            Store::open(&_dir.path().join("rapids.db"))
+                .await
+                .expect("reopen store"),
+        );
+        let sink = Arc::new(RecordingSink::new());
+        let sink_port: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
+        let (manager, join) =
+            rapids_host::manager::spawn(Arc::clone(&store), sink_port, Clock::utc());
+        Self {
+            host: Host::new(Arc::clone(&store), manager.clone()),
+            store,
+            manager,
+            sink,
+            join,
+            downloads,
+            _dir,
+        }
     }
 }
 
@@ -309,12 +346,15 @@ async fn a_schedule_is_created_listed_switched_off_and_removed() {
     let listed = harness.host.schedules_list().await.expect("list");
     assert!(!listed[0].enabled);
 
-    harness
-        .host
-        .schedule_delete(view.id)
-        .await
-        .expect("delete");
-    assert!(harness.host.schedules_list().await.expect("list").is_empty());
+    harness.host.schedule_delete(view.id).await.expect("delete");
+    assert!(
+        harness
+            .host
+            .schedules_list()
+            .await
+            .expect("list")
+            .is_empty()
+    );
 
     harness.finish().await;
 }
@@ -336,7 +376,14 @@ async fn a_schedule_without_a_name_is_refused() {
         .await
         .expect_err("no name");
     assert!(matches!(&error, HostError::Invalid { .. }));
-    assert!(harness.host.schedules_list().await.expect("list").is_empty());
+    assert!(
+        harness
+            .host
+            .schedules_list()
+            .await
+            .expect("list")
+            .is_empty()
+    );
 
     harness.finish().await;
 }
@@ -398,7 +445,9 @@ async fn progress_arrives_in_batches_and_the_last_sample_is_not_lost() {
         .collect();
     assert!(!batches.is_empty(), "progress was reported");
     assert!(
-        batches.iter().all(|ids| ids.iter().all(|id| *id == view.id)),
+        batches
+            .iter()
+            .all(|ids| ids.iter().all(|id| *id == view.id)),
         "every sample belongs to the task that ran"
     );
     assert!(
@@ -491,5 +540,234 @@ async fn a_settings_value_the_store_cannot_read_is_reported_not_hidden() {
         "the same value fails the same way through the plain reader"
     );
 
+    harness.finish().await;
+}
+
+#[tokio::test]
+async fn app_wide_limits_round_trip_through_restart_and_change_live() {
+    let total = 512 * 1024u64;
+    let mut options = options(total);
+    options.throttle_bps = Some(128 * 1024);
+    let server = TestServer::start(options);
+    let harness = Harness::start().await;
+    let settings = harness
+        .host
+        .settings_update("max_connections_total", &serde_json::json!(1))
+        .await
+        .expect("set connection budget");
+    assert_eq!(settings.max_connections_total, 1);
+    let settings = harness
+        .host
+        .settings_update("global_speed_limit", &serde_json::json!(512 * 1024))
+        .await
+        .expect("set shared rate");
+    assert_eq!(settings.global_speed_limit, Some(512 * 1024));
+
+    let harness = harness.restart().await;
+    let settings = harness
+        .host
+        .settings_get()
+        .await
+        .expect("settings after restart");
+    assert_eq!(settings.max_connections_total, 1);
+    assert_eq!(settings.global_speed_limit, Some(512 * 1024));
+    assert!(
+        harness
+            .host
+            .settings_update("max_connections_total", &serde_json::json!(0))
+            .await
+            .is_err()
+    );
+    assert!(
+        harness
+            .host
+            .settings_update("global_speed_limit", &serde_json::json!(0))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        harness
+            .host
+            .settings_get()
+            .await
+            .expect("unchanged settings"),
+        settings
+    );
+
+    let first = harness
+        .host
+        .task_add(harness.request(&server.url("/first.bin")))
+        .await
+        .expect("first");
+    let second = harness
+        .host
+        .task_add(harness.request(&server.url("/second.bin")))
+        .await
+        .expect("second");
+    assert_eq!(
+        harness.row(first.id).await.status_enum(),
+        Some(TaskStatus::Downloading)
+    );
+    assert_eq!(
+        harness.row(second.id).await.status_enum(),
+        Some(TaskStatus::Queued),
+        "one connection admits only one running task"
+    );
+
+    let changed = harness
+        .host
+        .settings_update("max_connections_total", &serde_json::json!(2))
+        .await
+        .expect("raise connection budget");
+    assert_eq!(changed.max_connections_total, 2);
+    harness
+        .wait_for(second.id, "new capacity starts queued work", |row| {
+            row.status_enum() == Some(TaskStatus::Downloading)
+        })
+        .await;
+    harness
+        .host
+        .settings_update("max_connections_total", &serde_json::json!(1))
+        .await
+        .expect("lower the budget while both tasks run");
+
+    for id in [first.id, second.id] {
+        let row = harness
+            .wait_for(id, "complete under a changing budget", |row| {
+                row.status_enum() == Some(TaskStatus::Completed)
+            })
+            .await;
+        assert_eq!(
+            row.observed_sha256.as_deref(),
+            Some(expected_sha256(total).as_str())
+        );
+    }
+    assert_eq!(
+        harness
+            .host
+            .settings_get()
+            .await
+            .expect("latest budget")
+            .max_connections_total,
+        1
+    );
+    harness.finish().await;
+}
+
+#[tokio::test]
+async fn two_concurrent_tasks_obey_one_global_rate_band() {
+    let total = 3 * 1024 * 1024u64;
+    let rate = 512 * 1024u64;
+    let server = TestServer::start(options(total));
+    let harness = Harness::start().await;
+    harness
+        .host
+        .settings_update("max_connections_total", &serde_json::json!(4))
+        .await
+        .expect("connection budget");
+    harness
+        .host
+        .settings_update("global_speed_limit", &serde_json::json!(rate))
+        .await
+        .expect("shared rate");
+
+    let started = Instant::now();
+    let first = harness
+        .host
+        .task_add(harness.request(&server.url("/left.bin")))
+        .await
+        .expect("left");
+    let second = harness
+        .host
+        .task_add(harness.request(&server.url("/right.bin")))
+        .await
+        .expect("right");
+    harness
+        .wait_for(second.id, "both started", |row| {
+            row.status_enum() == Some(TaskStatus::Downloading)
+        })
+        .await;
+    assert_eq!(
+        harness.row(first.id).await.status_enum(),
+        Some(TaskStatus::Downloading)
+    );
+
+    for id in [first.id, second.id] {
+        let row = harness
+            .wait_for(id, "global-rate completion", |row| {
+                row.status_enum() == Some(TaskStatus::Completed)
+            })
+            .await;
+        assert_eq!(
+            row.observed_sha256.as_deref(),
+            Some(expected_sha256(total).as_str())
+        );
+    }
+    let elapsed = started.elapsed();
+    let measured = (2 * total) as f64 / elapsed.as_secs_f64();
+    let ratio = measured / rate as f64;
+    println!("aggregate rate: {measured:.0} B/s in {elapsed:?}, ratio: {ratio:.3}x");
+    // At 512 KiB/s, each ~16 KiB bucket payment waits ~31.25 ms. Windows'
+    // coarse timer and per-chunk I/O yielded 0.509-0.557x in three solo runs
+    // without suite contention; Linux ran near 1.0x. The 0.40x floor keeps
+    // the throttled efficiency band meaningful across platforms, while the
+    // unchanged 1.15x ceiling rejects unthrottled loopback (>5x). Shorter
+    // wait slices or batched payments are M3 engine work, not this M2 fix.
+    assert!(
+        (0.40..=1.15).contains(&ratio),
+        "two completed tasks averaged {measured:.0} B/s in {elapsed:?}, expected {rate} B/s (0.40x-1.15x, coarse-timer platforms included)"
+    );
+    harness.finish().await;
+}
+
+#[tokio::test]
+async fn clearing_a_global_rate_releases_an_active_task_even_with_the_queue_paused() {
+    let total = 2 * 1024 * 1024u64;
+    let server = TestServer::start(options(total));
+    let harness = Harness::start().await;
+    harness
+        .host
+        .settings_update("global_speed_limit", &serde_json::json!(128 * 1024))
+        .await
+        .expect("initial rate");
+    let task = harness
+        .host
+        .task_add(harness.request(&server.url("/payload.bin")))
+        .await
+        .expect("add");
+    harness
+        .wait_for(task.id, "throttled progress", |row| {
+            row.downloaded >= 64 * 1024
+        })
+        .await;
+    harness.host.queue_pause().await.expect("pause queue only");
+
+    let changed_at = Instant::now();
+    let settings = harness
+        .host
+        .settings_update("global_speed_limit", &serde_json::Value::Null)
+        .await
+        .expect("clear the live rate");
+    assert_eq!(settings.global_speed_limit, None);
+    let done = harness
+        .wait_for(task.id, "completion after removing the limit", |row| {
+            row.status_enum() == Some(TaskStatus::Completed)
+        })
+        .await;
+    assert_eq!(
+        done.observed_sha256.as_deref(),
+        Some(expected_sha256(total).as_str())
+    );
+    assert!(
+        changed_at.elapsed() < Duration::from_secs(8),
+        "an old 128 KiB/s limit would keep the remaining bytes waiting"
+    );
+    assert!(
+        harness
+            .host
+            .queue_paused()
+            .await
+            .expect("queue still paused")
+    );
     harness.finish().await;
 }

@@ -211,6 +211,204 @@ async fn pause_then_resume_completes_byte_perfectly() {
 }
 
 #[tokio::test]
+async fn stopping_releases_the_workspace_for_a_byte_perfect_restart() {
+    let total = 16 * 1024 * 1024u64;
+    let mut server_options = options(total);
+    server_options.throttle_bps = Some(512 * 1024);
+    let server = TestServer::start(server_options);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let dest = dir.path().join("payload.bin");
+    let mut spec = spec_for(&server.url("/payload.bin"), &dest);
+    spec.connections = Some(4);
+
+    let (first, mut first_rx) =
+        spawn_download(spec.clone(), EngineConfig::default()).expect("first run");
+    wait_for(&mut first_rx, 30, "progress before stop", |event| {
+        matches!(event, EngineEvent::Progress { downloaded, .. } if *downloaded >= 2 * 1024 * 1024)
+    })
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(15), first.stop())
+        .await
+        .expect("stop released the coordinator");
+    assert_eq!(first.state(), rapids_engine::DownloadState::Stopped);
+    let stopped = wait_for(&mut first_rx, 15, "stopped event", |event| {
+        matches!(event, EngineEvent::Stopped)
+    })
+    .await;
+    assert!(stopped.is_terminal());
+    first.stop().await;
+
+    let workspace = Workspace::for_dest(&dest);
+    let saved = Manifest::load(&workspace.dir)
+        .await
+        .expect("stopped manifest");
+    let confirmed: u64 = saved.segments.iter().map(|segment| segment.written).sum();
+    assert!(
+        confirmed >= 2 * 1024 * 1024 && confirmed < total,
+        "stopped after {confirmed} of {total} bytes"
+    );
+    assert!(workspace.part_path.exists(), "the part file survives stop");
+    assert!(!dest.exists(), "a partial file is never published");
+    assert!(saved.can_resume(
+        Some(total),
+        saved.etag.as_deref(),
+        saved.last_modified.as_deref()
+    ));
+
+    // The first handle is deliberately still alive: stop, not dropping the
+    // process or handle, is what must release the operating-system lock.
+    let mut available = Workspace::for_dest(&dest);
+    available.create_and_lock().await.expect("lock released");
+    drop(available);
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "old requests settled"
+    );
+    server.clear_requests();
+
+    let (second, mut second_rx) = spawn_download(spec, EngineConfig::default()).expect("restart");
+    let completed = wait_for(&mut second_rx, 60, "resumed completion", |event| {
+        matches!(event, EngineEvent::Completed { .. })
+    })
+    .await;
+    drop(second);
+    let expected = expected_sha256(total);
+    assert_eq!(rapids_engine::sha256_file(&dest).expect("hash"), expected);
+    match completed {
+        EngineEvent::Completed { sha256, .. } => {
+            assert_eq!(sha256.as_deref(), Some(expected.as_str()));
+        }
+        other => panic!("expected completion, got {other}"),
+    }
+    assert!(!workspace.dir.exists(), "completed sidecar is removed");
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "resumed requests settled"
+    );
+
+    let requests = server.requests();
+    let refetched: u64 = requests
+        .iter()
+        .filter(|record| record.method == "GET")
+        .map(|record| record.body_len)
+        .sum();
+    assert!(
+        refetched < total * 9 / 10,
+        "the restart fetched {refetched} of {total} bytes"
+    );
+    assert!(
+        requests
+            .iter()
+            .filter_map(|record| record.range.as_deref())
+            .any(|range| {
+                range
+                    .strip_prefix("bytes=")
+                    .and_then(|value| value.split_once('-'))
+                    .and_then(|(start, _)| start.parse::<u64>().ok())
+                    .is_some_and(|start| start > 0)
+            }),
+        "a resumable request starts after byte zero"
+    );
+}
+
+#[tokio::test]
+async fn stopping_a_paused_download_unlocks_without_deleting_bytes() {
+    let total = 8 * 1024 * 1024u64;
+    let mut server_options = options(total);
+    server_options.throttle_bps = Some(512 * 1024);
+    let server = TestServer::start(server_options);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let dest = dir.path().join("payload.bin");
+    let mut spec = spec_for(&server.url("/payload.bin"), &dest);
+    spec.connections = Some(4);
+
+    let (handle, mut rx) = spawn_download(spec, EngineConfig::default()).expect("spawn");
+    wait_for(&mut rx, 30, "early progress", |event| {
+        matches!(event, EngineEvent::Progress { downloaded, .. } if *downloaded >= 512 * 1024)
+    })
+    .await;
+    handle.pause().await;
+    wait_for(&mut rx, 15, "pause", |event| {
+        matches!(
+            event,
+            EngineEvent::StateChanged {
+                state: rapids_engine::DownloadState::Paused
+            }
+        )
+    })
+    .await;
+
+    let workspace = Workspace::for_dest(&dest);
+    let before = Manifest::load(&workspace.dir)
+        .await
+        .expect("paused manifest");
+    let saved_before: u64 = before.segments.iter().map(|segment| segment.written).sum();
+    assert!(saved_before > 0);
+    let mut claimant = Workspace::for_dest(&dest);
+    assert!(
+        matches!(
+            claimant.create_and_lock().await,
+            Err(rapids_engine::EngineError::WorkspaceLocked { .. })
+        ),
+        "pause does not release the lock"
+    );
+
+    tokio::time::timeout(Duration::from_secs(15), handle.stop())
+        .await
+        .expect("stop while paused");
+    assert_eq!(handle.state(), rapids_engine::DownloadState::Stopped);
+    wait_for(&mut rx, 15, "stopped", |event| {
+        matches!(event, EngineEvent::Stopped)
+    })
+    .await;
+    claimant
+        .create_and_lock()
+        .await
+        .expect("stop released lock");
+    drop(claimant);
+    let after = Manifest::load(&workspace.dir)
+        .await
+        .expect("stopped manifest");
+    let saved_after: u64 = after.segments.iter().map(|segment| segment.written).sum();
+    assert!(saved_after >= saved_before);
+    assert!(workspace.part_path.exists());
+    assert!(!dest.exists());
+}
+
+#[tokio::test]
+async fn stopping_before_the_probe_does_not_start_network_work() {
+    let server = TestServer::start(options(4 * 1024 * 1024));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let dest = dir.path().join("payload.bin");
+    let (handle, mut rx) = spawn_download(
+        spec_for(&server.url("/payload.bin"), &dest),
+        EngineConfig::default(),
+    )
+    .expect("spawn");
+
+    // No yield between spawning and requesting stop: the coordinator must
+    // notice the flag before attempting the first HTTP probe.
+    tokio::time::timeout(Duration::from_secs(15), handle.stop())
+        .await
+        .expect("stop before probe");
+    assert_eq!(handle.state(), rapids_engine::DownloadState::Stopped);
+    wait_for(&mut rx, 15, "stopped", |event| {
+        matches!(event, EngineEvent::Stopped)
+    })
+    .await;
+    assert!(
+        server.wait_idle(Duration::from_secs(10)),
+        "requests settled"
+    );
+    assert!(server.requests().is_empty(), "stop prevented a probe");
+    assert!(!dest.exists());
+    let mut claimant = Workspace::for_dest(&dest);
+    claimant.create_and_lock().await.expect("no lock retained");
+    drop(claimant);
+}
+
+#[tokio::test]
 async fn cancel_discards_the_workspace() {
     let total = 16 * 1024 * 1024u64;
     let mut server_options = options(total);
@@ -274,10 +472,7 @@ async fn second_process_is_rejected_while_the_lock_is_held() {
     .await;
     drop(second);
     match failure {
-        EngineEvent::Failed {
-            message,
-            retryable,
-        } => {
+        EngineEvent::Failed { message, retryable } => {
             assert!(
                 message.contains("working on"),
                 "message should identify the busy workspace: {message}"
@@ -356,10 +551,7 @@ async fn mid_download_validator_change_fails_the_task() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed {
-            message,
-            retryable,
-        } => {
+        EngineEvent::Failed { message, retryable } => {
             assert!(
                 message.contains("changed on the server"),
                 "failure should explain the content change: {message}"
@@ -390,10 +582,7 @@ async fn mismatched_expected_sha_reports_both_hashes() {
     drop(handle);
 
     match failure {
-        EngineEvent::Failed {
-            message,
-            retryable,
-        } => {
+        EngineEvent::Failed { message, retryable } => {
             assert!(message.contains("SHA-256 verification failed"));
             assert!(
                 message.contains(&wrong),

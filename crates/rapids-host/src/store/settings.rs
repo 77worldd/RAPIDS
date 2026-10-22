@@ -115,11 +115,9 @@ pub fn encode_string(value: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setting {
     MaxParallel,
-    /// How many connections the whole app may hold open at once, across every
-    /// running download. It is a budget, not a field of any one request: the
-    /// engine refuses a per-task connection count above
-    /// [`crate::manager::MAX_CONNECTIONS_PER_TASK`], so the task plan is
-    /// derived from this budget and clamped to that ceiling.
+    /// How many active HTTP connections the app may use across all running
+    /// downloads. It is a shared budget, not a per-task connection plan;
+    /// task plans remain capped by [`crate::manager::MAX_CONNECTIONS_PER_TASK`].
     MaxConnectionsTotal,
     GlobalSpeedLimit,
     ResumeOnStart,
