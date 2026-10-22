@@ -4,6 +4,7 @@ import {
   createSniffInbox,
   dismissSniffInbox,
   receiveSniffCandidate,
+  selectSniffCandidate,
   sniffCandidateLabel,
   toInspectorUrl,
   toSniffCandidate,
@@ -147,4 +148,70 @@ test("labels hide signed queries without changing the selectable URL", () => {
   const fresh = receiveSniffCandidate(current, reopened);
   assert.deepEqual(fresh.candidates, [reopened]);
   assert.equal(receiveSniffCandidate(fresh, parsed), fresh);
+});
+
+test("receiving media is passive and unlisted choices cannot prefill a URL", () => {
+  const first = candidate();
+  const inbox = receiveSniffCandidate(createSniffInbox(), first);
+  assert.deepEqual(inbox.candidates, [first]);
+  assert.equal(inbox.dismissed, false);
+
+  const unlisted = candidate({ url: TRAILER, source: "link" });
+  const choice = selectSniffCandidate(inbox, unlisted);
+  assert.equal(choice.url, null);
+  assert.equal(choice.inbox, inbox);
+});
+
+test("explicit selection retains the exact signed URL and mutes that page", () => {
+  const signed = candidate({
+    url: "https://cdn.example/trailer.mp4?signature=Q%2B9&expires=42",
+    source: "link",
+  });
+  const inbox = receiveSniffCandidate(createSniffInbox(), signed);
+  const choice = selectSniffCandidate(inbox, signed);
+  assert.equal(choice.url, signed.url);
+  assert.equal(choice.inbox.dismissed, true);
+  assert.deepEqual(choice.inbox.candidates, []);
+  assert.equal(receiveSniffCandidate(choice.inbox, signed), choice.inbox);
+  assert.equal(selectSniffCandidate(choice.inbox, signed).url, null);
+});
+
+test("a stale page or session cannot select a matching URL", () => {
+  const old = candidate();
+  const current = candidate({ session: 8, pageUrl: TRAILER });
+  const inbox = receiveSniffCandidate(
+    receiveSniffCandidate(createSniffInbox(), old),
+    current,
+  );
+  for (const stale of [
+    old,
+    candidate({ session: 8 }),
+    candidate({
+      session: 8,
+      pageUrl: TRAILER,
+      source: "link",
+    }),
+  ]) {
+    const choice = selectSniffCandidate(inbox, stale);
+    assert.equal(choice.url, null);
+    assert.equal(choice.inbox, inbox);
+  }
+});
+
+test("a new navigation may be explicitly selected after dismissal", () => {
+  const first = candidate();
+  const dismissed = dismissSniffInbox(
+    receiveSniffCandidate(createSniffInbox(), first),
+  );
+  const next = candidate({
+    pageUrl: "http://127.0.0.1:53001/next.html",
+    url: TRAILER,
+    source: "link",
+  });
+  const inbox = receiveSniffCandidate(dismissed, next);
+  assert.equal(inbox.dismissed, false);
+  assert.equal(selectSniffCandidate(inbox, first).url, null);
+  const choice = selectSniffCandidate(inbox, next);
+  assert.equal(choice.url, TRAILER);
+  assert.equal(choice.inbox.dismissed, true);
 });

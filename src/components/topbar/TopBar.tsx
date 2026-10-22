@@ -1,4 +1,5 @@
 import { AddDownloadButton } from "./AddDownloadButton";
+import { InspectPageButton } from "./InspectPageButton";
 import { QueueToggle } from "./QueueToggle";
 import { RefreshButton } from "./RefreshButton";
 import { SearchBox } from "./SearchBox";
@@ -10,6 +11,7 @@ export function TopBar() {
       <ViewTitle />
       <SearchBox />
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <InspectPageButton />
         <AddDownloadButton />
         <QueueToggle />
         <RefreshButton />
