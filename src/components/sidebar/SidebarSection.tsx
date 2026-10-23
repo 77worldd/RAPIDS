@@ -20,9 +20,9 @@ export function SidebarSection({
   onSelect,
 }: SidebarSectionProps) {
   return (
-    <section className="px-2 py-1.5">
+    <section className="px-2.5 py-1">
       {!collapsed && (
-        <h3 className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500">
+        <h3 className="px-2.5 pb-1.5 pt-2 text-[9.5px] font-semibold uppercase tracking-[0.13em] text-zinc-600">
           {title}
         </h3>
       )}

@@ -11,21 +11,24 @@ export function QueueToggle() {
 
   return queuePaused ? (
     <Button
+      variant="secondary"
       onClick={() => {
         command(() => resumeQueue());
       }}
+      title="Start queued downloads"
     >
-      <Play size={13} strokeWidth={2} />
-      Resume queue
+      <Play size={13} strokeWidth={2.2} />
+      Start queue
     </Button>
   ) : (
     <Button
-      className="bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+      variant="secondary"
       onClick={() => {
         command(() => pauseQueue());
       }}
+      title="Stop new downloads from starting"
     >
-      <Pause size={13} strokeWidth={2} />
+      <Pause size={13} strokeWidth={2.2} />
       Pause queue
     </Button>
   );

@@ -5,7 +5,13 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "coverage/**", "node_modules/**", "src-tauri/**"],
+    ignores: [
+      "dist/**",
+      "coverage/**",
+      "node_modules/**",
+      "src-tauri/**",
+      "target/**",
+    ],
   },
   {
     files: ["**/*.{js,mjs,cjs}"],

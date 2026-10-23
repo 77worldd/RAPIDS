@@ -47,6 +47,8 @@ function isCategory(value: unknown): value is TagId {
     value === "movies" ||
     value === "music" ||
     value === "images" ||
+    value === "documents" ||
+    value === "archives" ||
     value === "other"
   );
 }
@@ -170,6 +172,12 @@ export function fetchAppInfo(): Promise<AppInfo> {
     isRecord(value) &&
     typeof value.name === "string" &&
     typeof value.version === "string",
+  );
+}
+
+export function fetchDownloadDefaultDir(): Promise<string> {
+  return checked("download_default_dir", (value): value is string =>
+    typeof value === "string" && value !== "",
   );
 }
 

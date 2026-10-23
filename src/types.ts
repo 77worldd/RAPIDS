@@ -1,13 +1,19 @@
 export type CoreViewId =
   | "all"
-  | "running"
-  | "paused"
+  | "downloading"
+  | "queued"
   | "completed"
-  | "unfinished"
-  | "waiting"
-  | "finished";
+  | "paused"
+  | "failed";
 
-export type TagId = "apps" | "movies" | "music" | "images" | "other";
+export type TagId =
+  | "movies"
+  | "music"
+  | "images"
+  | "documents"
+  | "archives"
+  | "apps"
+  | "other";
 
 export type ViewId = CoreViewId | TagId;
 

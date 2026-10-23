@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { ArrowDownToLine } from "lucide-react";
 import { useMemo } from "react";
 import { NAV_SECTIONS } from "../../config/navigation";
 import { cn } from "../../lib/cn";
@@ -10,11 +11,16 @@ import { SidebarFooter } from "./SidebarFooter";
 import { SidebarSection } from "./SidebarSection";
 import { SidebarToggle } from "./SidebarToggle";
 
-const EXPANDED_WIDTH = 232;
-const COLLAPSED_WIDTH = 52;
+const EXPANDED_WIDTH = 240;
+const COLLAPSED_WIDTH = 56;
 
 export function Sidebar() {
-  const { tasks, viewId, sidebarCollapsed: collapsed } = useStoreState();
+  const {
+    tasks,
+    viewId,
+    sidebarCollapsed: collapsed,
+    queuePaused,
+  } = useStoreState();
   const dispatch = useStoreDispatch();
 
   const counts = useMemo(() => {
@@ -27,37 +33,58 @@ export function Sidebar() {
     return map;
   }, [tasks]);
 
+  const active = tasks.filter((task) => task.status === "downloading").length;
+  const waiting = tasks.filter(
+    (task) => task.status === "queued" || task.status === "scheduled",
+  ).length;
+  const speed = tasks.reduce(
+    (total, task) =>
+      task.status === "downloading" ? total + task.speedBps : total,
+    0,
+  );
+
   return (
     <motion.aside
       initial={false}
       animate={{ width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
       transition={TRANSITION}
-      className="relative z-10 flex h-full shrink-0 flex-col overflow-hidden border-r border-zinc-800/80 bg-zinc-950"
+      className="relative z-10 flex h-full shrink-0 flex-col overflow-hidden border-r border-line/80 bg-[#0c0e10]"
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-800/80 px-3">
-        <span
-          className={cn(
-            "text-[13px] font-semibold tracking-wider text-zinc-100",
-            collapsed && "sr-only",
-          )}
-        >
-          RAPIDS
-        </span>
-        <div className={cn(!collapsed && "ml-auto")}>
+      <div
+        className={cn(
+          "flex h-14 shrink-0 items-center border-b border-line/80 px-3",
+          collapsed ? "justify-center" : "gap-2.5",
+        )}
+      >
+        {!collapsed && (
+          <>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 text-zinc-950 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.9)]">
+              <ArrowDownToLine size={16} strokeWidth={2.2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-semibold tracking-[0.14em] text-zinc-100">
+                RAPIDS
+              </p>
+              <p className="mt-0.5 text-[10px] text-zinc-500">Download manager</p>
+            </div>
+          </>
+        )}
+        <div className={cn(collapsed && "flex justify-center")}>
           <SidebarToggle
             collapsed={collapsed}
             onToggle={() => dispatch({ type: "sidebar/toggle" })}
           />
         </div>
       </div>
+
       <nav
         aria-label="Download views"
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-1.5"
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-2"
       >
         {NAV_SECTIONS.map((section, index) => (
           <div key={section.id}>
             {collapsed && index > 0 && (
-              <div className="mx-2 my-1.5 h-px bg-zinc-800" />
+              <div className="mx-2 my-2 h-px bg-line/80" />
             )}
             <SidebarSection
               title={section.title}
@@ -72,7 +99,14 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-      <SidebarFooter />
+
+      <SidebarFooter
+        collapsed={collapsed}
+        active={active}
+        waiting={waiting}
+        speed={speed}
+        queuePaused={queuePaused}
+      />
     </motion.aside>
   );
 }

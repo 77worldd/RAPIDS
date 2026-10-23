@@ -11,11 +11,12 @@ export function SidebarToggle({ collapsed, onToggle }: SidebarToggleProps) {
     <IconButton
       label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       onClick={onToggle}
+      className="h-8 w-8"
     >
       {collapsed ? (
-        <PanelLeftOpen size={15} strokeWidth={1.75} />
+        <PanelLeftOpen size={15} strokeWidth={1.8} />
       ) : (
-        <PanelLeftClose size={15} strokeWidth={1.75} />
+        <PanelLeftClose size={15} strokeWidth={1.8} />
       )}
     </IconButton>
   );

@@ -9,6 +9,7 @@ use rapids_host::events::TaskView;
 use rapids_host::wire::{ScheduleCreateInput, TaskAddInput};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::adapter::AdapterState;
 
@@ -30,6 +31,27 @@ pub fn app_version(app: AppHandle) -> AppInfo {
         name: package.name.clone(),
         version: package.version.to_string(),
     }
+}
+
+#[tauri::command]
+pub fn download_default_dir(app: AppHandle) -> Result<String, String> {
+    app.path()
+        .download_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(message)
+}
+
+/// Opens a completed file through the plugin's native opener. The webview's
+/// opener scope is intentionally not widened: the command only accepts an
+/// existing file and delegates to the same operating-system association.
+#[tauri::command]
+pub fn open_download_file(app: AppHandle, path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).is_file() {
+        return Err("The downloaded file is no longer at its destination.".to_string());
+    }
+    app.opener()
+        .open_path(path, None::<String>)
+        .map_err(message)
 }
 
 #[tauri::command]

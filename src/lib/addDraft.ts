@@ -9,6 +9,7 @@ export interface AddDraft {
   readonly connections: string;
   readonly speedLimitBps: string;
   readonly expectedSha256: string;
+  readonly scheduleId: string;
 }
 
 export function createAddDraft(): AddDraft {
@@ -20,6 +21,7 @@ export function createAddDraft(): AddDraft {
     connections: "",
     speedLimitBps: "",
     expectedSha256: "",
+    scheduleId: "",
   };
 }
 
@@ -34,7 +36,7 @@ function optionalInteger(value: string, label: string): number | undefined {
 }
 
 /** The desktop app runs on Windows; relative folders would land in its working directory. */
-function isAbsoluteFolder(folder: string): boolean {
+export function isAbsoluteFolder(folder: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(folder) || /^\\\\[^\\]+\\[^\\]+(?:\\|$)/.test(folder);
 }
 
@@ -71,6 +73,10 @@ export function toAddRequest(draft: AddDraft): TaskAddInput {
   if (expectedSha256 !== "" && !/^[a-fA-F0-9]{64}$/.test(expectedSha256)) {
     throw new Error("The SHA-256 checksum must be exactly 64 hexadecimal characters.");
   }
+  const scheduleId = optionalInteger(draft.scheduleId, "Start window");
+  if (scheduleId !== undefined && scheduleId < 1) {
+    throw new Error("Choose a valid start window.");
+  }
 
   return {
     url,
@@ -80,5 +86,6 @@ export function toAddRequest(draft: AddDraft): TaskAddInput {
     ...(connections !== undefined ? { connections } : {}),
     ...(speedLimitBps !== undefined ? { speedLimitBps } : {}),
     ...(expectedSha256 !== "" ? { expectedSha256: expectedSha256.toLowerCase() } : {}),
+    ...(scheduleId !== undefined ? { scheduleId } : {}),
   };
 }

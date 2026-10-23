@@ -12,10 +12,11 @@ import {
   selectSniffCandidate,
   toInspectorUrl,
 } from "../../lib/sniff";
+import { useAddDownload } from "../../state/AddDownloadProvider";
 import { useStoreDispatch } from "../../state/StoreProvider";
-import { AddDownloadDialog } from "../tasks/AddDownloadDialog";
 import { MediaCandidatePopup } from "../tasks/MediaCandidatePopup";
 import { Button } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
 
 interface InspectUrlDialogProps {
   readonly onOpen: (url: string) => Promise<void>;
@@ -142,11 +143,11 @@ function InspectUrlDialog({ onOpen, onClose }: InspectUrlDialogProps) {
 
 export function InspectPageButton() {
   const dispatch = useStoreDispatch();
+  const { openAdd } = useAddDownload();
   const listener = useRef<ReturnType<typeof subscribeSniffCandidates> | null>(
     null,
   );
   const [promptOpen, setPromptOpen] = useState(false);
-  const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   const [inbox, setInbox] = useState(createSniffInbox);
 
   useEffect(() => {
@@ -179,13 +180,12 @@ export function InspectPageButton() {
 
   return (
     <>
-      <Button
-        className="bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+      <IconButton
+        label="Inspect a media page"
         onClick={() => setPromptOpen(true)}
       >
-        <Globe2 size={14} strokeWidth={1.75} />
-        Inspect page
-      </Button>
+        <Globe2 size={15} strokeWidth={1.8} />
+      </IconButton>
       {promptOpen && (
         <InspectUrlDialog
           onClose={() => setPromptOpen(false)}
@@ -202,7 +202,6 @@ export function InspectPageButton() {
         />
       )}
       {!promptOpen &&
-        selectedUrl === null &&
         !inbox.dismissed &&
         inbox.pageUrl !== null &&
         inbox.candidates.length > 0 && (
@@ -214,17 +213,11 @@ export function InspectPageButton() {
               const choice = selectSniffCandidate(inbox, candidate);
               if (choice.url !== null) {
                 setInbox(choice.inbox);
-                setSelectedUrl(choice.url);
+                openAdd(choice.url);
               }
             }}
           />
         )}
-      {selectedUrl !== null && (
-        <AddDownloadDialog
-          initialUrl={selectedUrl}
-          onClose={() => setSelectedUrl(null)}
-        />
-      )}
     </>
   );
 }

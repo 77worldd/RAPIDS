@@ -778,7 +778,20 @@ impl Manager {
                 self.flush_progress();
                 self.running.remove(&id);
                 let row = self.row(id).await.ok();
-                let total = row.as_ref().and_then(|row| row.total_bytes);
+                // A very small transfer can finish before its first progress
+                // sample is persisted. The completed file is the source of
+                // truth for its final size, so the row never reports zero
+                // bytes for a finished download.
+                let total = match row.as_ref().and_then(|row| row.total_bytes) {
+                    Some(total) => Some(total),
+                    None => match row.as_ref() {
+                        Some(row) => tokio::fs::metadata(&row.dest_path)
+                            .await
+                            .ok()
+                            .map(|metadata| metadata.len() as i64),
+                        None => None,
+                    },
+                };
                 if tasks::mark_completed(self.store.pool(), id, total, sha256.as_deref(), now_ms())
                     .await
                     .is_ok()

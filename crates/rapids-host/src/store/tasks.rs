@@ -65,6 +65,8 @@ pub enum TaskCategory {
     Movies,
     Music,
     Images,
+    Documents,
+    Archives,
     Other,
 }
 
@@ -75,6 +77,8 @@ impl TaskCategory {
             Self::Movies => "movies",
             Self::Music => "music",
             Self::Images => "images",
+            Self::Documents => "documents",
+            Self::Archives => "archives",
             Self::Other => "other",
         }
     }
@@ -85,6 +89,8 @@ impl TaskCategory {
             "movies" => Some(Self::Movies),
             "music" => Some(Self::Music),
             "images" => Some(Self::Images),
+            "documents" => Some(Self::Documents),
+            "archives" => Some(Self::Archives),
             "other" => Some(Self::Other),
             _ => None,
         }

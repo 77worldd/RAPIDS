@@ -1,209 +1,282 @@
-import {
-  ArrowDown,
-  ArrowUp,
-  FileDown,
-  Pause,
-  Play,
-  RotateCcw,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ExternalLink, Pause, Play, RotateCcw, X } from "lucide-react";
+import { categoryFor } from "../../config/categories";
+import { cn } from "../../lib/cn";
 import {
   formatBytes,
   formatEta,
   formatSpeed,
   progressFraction,
-  shortHash,
 } from "../../lib/format";
-import type { Task } from "../../types";
-import { IconButton } from "../ui/IconButton";
+import type { Task, TagId } from "../../types";
+import type { TaskActions } from "../../state/useTaskActions";
 import { StatusPill } from "./StatusPill";
+import { TaskActionMenu } from "./TaskActionMenu";
 
-export interface TaskActions {
-  readonly pause: (id: number) => void;
-  readonly resume: (id: number) => void;
-  readonly retry: (id: number) => void;
-  readonly cancel: (id: number) => void;
-  readonly remove: (id: number, removeFile: boolean) => void;
-  readonly reorder: (id: number, priority: number) => void;
+const CATEGORY_TONE: Record<TagId, string> = {
+  movies: "bg-violet-500/10 text-violet-300",
+  music: "bg-sky-500/10 text-sky-300",
+  images: "bg-rose-500/10 text-rose-300",
+  documents: "bg-amber-500/10 text-amber-300",
+  archives: "bg-orange-500/10 text-orange-300",
+  apps: "bg-emerald-500/10 text-emerald-300",
+  other: "bg-zinc-500/10 text-zinc-300",
+};
+
+function extensionOf(fileName: string): string {
+  const dot = fileName.lastIndexOf(".");
+  if (dot <= 0 || dot === fileName.length - 1) return "FILE";
+  return fileName.slice(dot + 1).toUpperCase();
 }
 
-export function TaskRow({
+function statusWord(task: Task): string {
+  switch (task.status) {
+    case "downloading":
+      return "Transferring";
+    case "queued":
+      return "Waiting for a slot";
+    case "scheduled":
+      return "Scheduled";
+    case "paused":
+      return "Paused";
+    case "completed":
+      return "Complete";
+    case "error":
+      return "Failed";
+  }
+}
+
+function progressWidth(fraction: number | null): string {
+  return fraction === null ? "0%" : `${Math.round(fraction * 100)}%`;
+}
+
+function actionLabel(task: Task): string {
+  if (task.status === "downloading") return "Pause";
+  if (task.status === "paused") return "Resume";
+  if (task.status === "error") return "Retry";
+  if (task.status === "completed") return "Open file";
+  return "Cancel";
+}
+
+function RowAction({
   task,
   actions,
 }: {
   readonly task: Task;
   readonly actions: TaskActions;
 }) {
-  const fraction = progressFraction(task);
-  const size =
-    task.totalBytes === null
-      ? task.downloaded > 0
-        ? `${formatBytes(task.downloaded)} transferred · size unknown`
-        : "Size unknown"
-      : `${formatBytes(task.downloaded)} / ${formatBytes(task.totalBytes)}`;
-  const waiting =
-    task.status === "queued" ||
-    task.status === "scheduled" ||
-    task.status === "paused";
-  const finished = task.status === "completed" || task.status === "error";
+  const label = actionLabel(task);
+  const icon =
+    task.status === "downloading" ? (
+      <Pause size={14} strokeWidth={1.9} />
+    ) : task.status === "paused" ? (
+      <Play size={14} strokeWidth={1.9} />
+    ) : task.status === "error" ? (
+      <RotateCcw size={14} strokeWidth={1.9} />
+    ) : task.status === "completed" ? (
+      <ExternalLink size={14} strokeWidth={1.9} />
+    ) : (
+      <X size={14} strokeWidth={1.9} />
+    );
+
+  function activate(): void {
+    if (task.status === "downloading") actions.pause(task);
+    else if (task.status === "paused") actions.resume(task);
+    else if (task.status === "error") actions.retry(task);
+    else if (task.status === "completed") actions.openFile(task);
+    else actions.cancel(task);
+  }
 
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors duration-150 ease-out hover:bg-zinc-900/50">
-      <div className="min-w-[12rem] flex-[2]">
-        <div className="flex min-w-0 items-center gap-2">
-          <FileDown size={15} strokeWidth={1.75} className="shrink-0 text-zinc-500" />
-          <span className="truncate text-[13px] font-medium text-zinc-100" title={task.fileName}>
-            {task.fileName}
-          </span>
-          <span className="shrink-0 text-[11px] text-zinc-600">
-            {task.category}
-          </span>
-          {waiting && (
-            <span className="shrink-0 text-[11px] text-zinc-600">
-              Priority {task.priority}
-            </span>
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        activate();
+      }}
+      aria-label={`${label} ${task.fileName}`}
+      title={label}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/65",
+        task.status === "completed"
+          ? "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-300"
+          : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100",
+      )}
+    >
+      {icon}
+    </button>
+  );
+}
+
+export function TaskRow({
+  task,
+  selected,
+  onToggle,
+  actions,
+}: {
+  readonly task: Task;
+  readonly selected: boolean;
+  readonly onToggle: (id: number) => void;
+  readonly actions: TaskActions;
+}) {
+  const category = categoryFor(task.category);
+  const Icon = category.icon;
+  const extension = extensionOf(task.fileName);
+  const fraction = progressFraction(task);
+  const percent =
+    fraction === null ? null : Math.min(100, Math.max(0, Math.round(fraction * 100)));
+  const unknownSize = task.totalBytes === null;
+  const unknownProgress = fraction === null && task.status === "downloading";
+  const size = unknownSize
+    ? task.downloaded > 0
+      ? formatBytes(task.downloaded)
+      : "Unknown"
+    : formatBytes(task.totalBytes);
+  const downloadedLabel = unknownSize
+    ? `${formatBytes(task.downloaded)} received`
+    : `${formatBytes(task.downloaded)} of ${formatBytes(task.totalBytes)}`;
+
+  return (
+    <div
+      role="row"
+      aria-selected={selected}
+      onClick={(event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest("button, input, a, select, label") !== null
+        ) {
+          return;
+        }
+        onToggle(task.id);
+      }}
+      className={cn(
+        "group flex cursor-default items-center gap-2 border-b border-line/55 px-3 py-2.5 transition-colors duration-150 min-[1180px]:gap-3 min-[1180px]:px-4",
+        selected
+          ? "bg-emerald-500/[0.045]"
+          : task.status === "error"
+            ? "bg-red-500/[0.022] hover:bg-red-500/[0.04]"
+            : "hover:bg-white/[0.025]",
+      )}
+    >
+      <div className="flex w-5 shrink-0 items-center justify-center">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggle(task.id)}
+          onClick={(event) => event.stopPropagation()}
+          aria-label={`Select ${task.fileName}`}
+          className="h-3.5 w-3.5 cursor-pointer rounded border-zinc-600 bg-transparent accent-emerald-500"
+        />
+      </div>
+
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <span
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+            CATEGORY_TONE[task.category],
           )}
-        </div>
-        <p className="mt-1 truncate pl-[23px] text-[11px] text-zinc-500" title={task.url}>
-          {task.url}
-        </p>
-        <p className="mt-0.5 truncate pl-[23px] text-[11px] text-zinc-600" title={task.destPath}>
-          {task.destPath}
-        </p>
-        {task.errorMessage !== null && (
+        >
+          <Icon size={15} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
           <p
-            className="mt-1 truncate pl-[23px] text-[11px] text-red-300"
-            title={task.errorMessage}
+            className="truncate text-[12px] font-medium text-zinc-200 group-hover:text-zinc-100"
+            title={task.fileName}
           >
-            {task.errorMessage}
+            {task.fileName}
           </p>
-        )}
-        {task.status === "completed" && task.sha256 !== null && (
-          <p className="mt-1 pl-[23px] text-[11px] text-emerald-400/80" title={task.sha256}>
-            SHA-256 {shortHash(task.sha256)}
-          </p>
-        )}
-      </div>
-
-      <div className="w-40 shrink-0 text-[11px] tabular-nums text-zinc-400">
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate" title={size}>{size}</span>
-          {fraction !== null && (
-            <span className="shrink-0 text-zinc-500">
-              {Math.round(fraction * 100)}%
+          <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-zinc-500">
+            <span className="shrink-0 font-medium tracking-wide text-zinc-500">
+              {extension}
             </span>
+            <span className="text-zinc-700">·</span>
+            <span className="shrink-0">{category.label}</span>
+            <span className="text-zinc-700">·</span>
+            <span className="truncate" title={task.destPath}>
+              {task.destPath}
+            </span>
+          </p>
+          {task.status === "error" && task.errorMessage !== null && (
+            <p
+              className="mt-0.5 truncate text-[10px] text-red-300/90"
+              title={task.errorMessage}
+            >
+              {task.errorMessage}
+            </p>
           )}
         </div>
-        {fraction !== null && (
+      </div>
+
+      <div className="w-16 shrink-0 text-right min-[1180px]:w-[4.5rem]">
+        <p className="truncate text-[11px] tabular-nums text-zinc-300" title={size}>
+          {size}
+        </p>
+        <p className="mt-0.5 text-[9.5px] text-zinc-600">
+          {!unknownSize
+            ? "total"
+            : task.downloaded > 0
+              ? "received"
+              : task.status === "downloading" ||
+                  task.status === "queued" ||
+                  task.status === "scheduled"
+                ? "pending"
+                : "unreported"}
+        </p>
+      </div>
+
+      <div className="w-[7rem] shrink-0 min-[1180px]:w-40">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="truncate text-[10px] text-zinc-400">
+            {statusWord(task)}
+          </span>
+          <span className="shrink-0 text-[9.5px] tabular-nums text-zinc-600">
+            {percent === null ? "" : `${percent}%`}
+          </span>
+        </div>
+        <div className="relative h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
           <div
-            role="progressbar"
-            aria-label={`Download progress for ${task.fileName}`}
-            aria-valuenow={Math.round(fraction * 100)}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-zinc-800"
-          >
-            <div
-              className="h-full rounded-full bg-emerald-500 transition-[width] duration-150 ease-out"
-              style={{ width: `${fraction * 100}%` }}
-            />
-          </div>
-        )}
-        {task.status === "downloading" && (
-          <div className="mt-1.5 flex justify-between text-zinc-500">
-            <span>{formatSpeed(task.speedBps)}</span>
-            <span>ETA {formatEta(task.etaSeconds)}</span>
-          </div>
-        )}
+            className={cn(
+              "h-full rounded-full transition-[width] duration-300 ease-out",
+              unknownProgress && "rapids-progress-unknown w-1/3",
+              task.status === "error"
+                ? "bg-red-400/80"
+                : task.status === "paused"
+                  ? "bg-amber-400/80"
+                  : task.status === "completed"
+                    ? "bg-teal-400"
+                    : task.status === "queued" || task.status === "scheduled"
+                      ? "bg-sky-400/70"
+                      : "bg-emerald-400",
+            )}
+            style={unknownProgress ? undefined : { width: progressWidth(fraction) }}
+          />
+        </div>
+        <p className="mt-1 truncate text-[9.5px] tabular-nums text-zinc-600">
+          {downloadedLabel}
+        </p>
       </div>
 
-      <StatusPill status={task.status} />
-
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        {waiting && (
-          <>
-            <IconButton
-              label={`Raise priority (currently ${task.priority})`}
-              onClick={() => {
-                actions.reorder(task.id, task.priority + 1);
-              }}
-            >
-              <ArrowUp size={14} strokeWidth={1.75} />
-            </IconButton>
-            <IconButton
-              label={`Lower priority (currently ${task.priority})`}
-              onClick={() => {
-                actions.reorder(task.id, task.priority - 1);
-              }}
-            >
-              <ArrowDown size={14} strokeWidth={1.75} />
-            </IconButton>
-          </>
-        )}
-        {task.status === "downloading" && (
-          <IconButton
-            label="Pause download"
-            onClick={() => {
-              actions.pause(task.id);
-            }}
-          >
-            <Pause size={14} strokeWidth={1.75} />
-          </IconButton>
-        )}
-        {task.status === "paused" && (
-          <IconButton
-            label="Resume download"
-            onClick={() => {
-              actions.resume(task.id);
-            }}
-          >
-            <Play size={14} strokeWidth={1.75} />
-          </IconButton>
-        )}
-        {task.status === "error" && (
-          <IconButton
-            label="Retry download"
-            onClick={() => {
-              actions.retry(task.id);
-            }}
-          >
-            <RotateCcw size={14} strokeWidth={1.75} />
-          </IconButton>
-        )}
-        {finished ? (
-          <IconButton
-            label={task.status === "completed" ? "Remove from list and keep file" : "Remove failed download"}
-            onClick={() => {
-              actions.remove(task.id, false);
-            }}
-          >
-            <X size={14} strokeWidth={1.75} />
-          </IconButton>
-        ) : (
-          <IconButton
-            label="Cancel download"
-            onClick={() => {
-              actions.cancel(task.id);
-            }}
-          >
-            <X size={14} strokeWidth={1.75} />
-          </IconButton>
-        )}
-        {task.status === "completed" && (
-          <IconButton
-            label="Delete downloaded file"
-            className="text-red-400 hover:text-red-300"
-            onClick={() => {
-              if (window.confirm(`Delete the downloaded file at ${task.destPath}?`)) {
-                actions.remove(task.id, true);
-              }
-            }}
-          >
-            <Trash2 size={14} strokeWidth={1.75} />
-          </IconButton>
-        )}
+      <div className="w-[3.75rem] shrink-0 text-right min-[1180px]:w-[4.2rem]">
+        <p className="truncate text-[11px] tabular-nums text-zinc-300">
+          {task.status === "downloading" && task.speedBps > 0
+            ? formatSpeed(task.speedBps)
+            : "—"}
+        </p>
       </div>
-    </li>
+
+      <div className="w-[3.25rem] shrink-0 text-right min-[1180px]:w-14">
+        <p className="truncate text-[11px] tabular-nums text-zinc-300">
+          {task.status === "downloading" ? formatEta(task.etaSeconds) : "—"}
+        </p>
+      </div>
+
+      <div className="w-24 shrink-0 min-[1180px]:w-28">
+        <StatusPill status={task.status} />
+      </div>
+
+      <div className="flex w-[3.6rem] shrink-0 items-center justify-end gap-0.5">
+        <RowAction task={task} actions={actions} />
+        <TaskActionMenu task={task} actions={actions} />
+      </div>
+    </div>
   );
 }

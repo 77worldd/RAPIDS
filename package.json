@@ -8,6 +8,7 @@
     "build": "npm run typecheck && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:add-draft": "node --experimental-strip-types --test tests/add-draft.test.mjs",
+    "test:file-meta": "node --experimental-strip-types --test tests/file-meta.test.mjs",
     "test:sniff": "node --experimental-strip-types --test tests/sniff.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -17,6 +18,8 @@
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "framer-motion": "^14.4.0",
     "lucide-react": "^1.60.0",
     "react": "^18.3.1",

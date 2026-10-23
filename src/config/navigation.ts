@@ -1,19 +1,14 @@
 import {
-  CheckCheck,
   CircleCheckBig,
-  CircleDashed,
+  CircleX,
   Clock,
-  Disc3,
   Download,
-  File,
-  Film,
-  Image,
   List,
-  Package,
   Pause,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ViewId } from "../types";
+import { CATEGORIES } from "./categories";
 
 export interface NavItem {
   readonly id: ViewId;
@@ -22,41 +17,32 @@ export interface NavItem {
 }
 
 export interface NavSection {
-  readonly id: "tasks" | "scheduled" | "tags";
+  readonly id: "library" | "categories";
   readonly title: string;
   readonly items: readonly NavItem[];
 }
 
 export const NAV_SECTIONS: readonly NavSection[] = [
   {
-    id: "tasks",
-    title: "Tasks",
+    id: "library",
+    title: "Library",
     items: [
-      { id: "all", label: "All", icon: List },
-      { id: "running", label: "Running", icon: Download },
-      { id: "paused", label: "Paused", icon: Pause },
+      { id: "all", label: "All Downloads", icon: List },
+      { id: "downloading", label: "Downloading", icon: Download },
+      { id: "queued", label: "Queued", icon: Clock },
       { id: "completed", label: "Completed", icon: CircleCheckBig },
-      { id: "unfinished", label: "Unfinished", icon: CircleDashed },
+      { id: "paused", label: "Paused", icon: Pause },
+      { id: "failed", label: "Failed", icon: CircleX },
     ],
   },
   {
-    id: "scheduled",
-    title: "Scheduled",
-    items: [
-      { id: "waiting", label: "Waiting", icon: Clock },
-      { id: "finished", label: "Finished", icon: CheckCheck },
-    ],
-  },
-  {
-    id: "tags",
-    title: "Tags",
-    items: [
-      { id: "apps", label: "Apps", icon: Package },
-      { id: "movies", label: "Movies", icon: Film },
-      { id: "music", label: "Music", icon: Disc3 },
-      { id: "images", label: "Images", icon: Image },
-      { id: "other", label: "Other", icon: File },
-    ],
+    id: "categories",
+    title: "Categories",
+    items: CATEGORIES.map((category) => ({
+      id: category.id,
+      label: category.label,
+      icon: category.icon,
+    })),
   },
 ];
 

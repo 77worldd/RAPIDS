@@ -1,20 +1,26 @@
 import { AddDownloadButton } from "./AddDownloadButton";
 import { InspectPageButton } from "./InspectPageButton";
+import { PasteUrlButton } from "./PasteUrlButton";
 import { QueueToggle } from "./QueueToggle";
-import { RefreshButton } from "./RefreshButton";
 import { SearchBox } from "./SearchBox";
+import { SettingsButton } from "./SettingsButton";
 import { ViewTitle } from "./ViewTitle";
 
 export function TopBar() {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-4 border-b border-zinc-800/80 bg-zinc-950 px-4">
+    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line/80 bg-panel/75 px-4 backdrop-blur">
       <ViewTitle />
-      <SearchBox />
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
-        <InspectPageButton />
+      <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-1.5">
+        <SearchBox />
+        <div className="mx-1 h-5 w-px shrink-0 bg-line" />
+        <PasteUrlButton />
         <AddDownloadButton />
         <QueueToggle />
-        <RefreshButton />
+        <div className="mx-1 h-5 w-px shrink-0 bg-line" />
+        <SettingsButton />
+        <div className="hidden items-center gap-1.5 min-[1080px]:flex">
+          <InspectPageButton />
+        </div>
       </div>
     </header>
   );
