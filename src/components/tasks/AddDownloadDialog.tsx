@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ClipboardPaste,
   FolderOpen,
+  Globe2,
   Link2,
   ShieldCheck,
   Sparkles,
@@ -19,7 +20,12 @@ import {
   type KeyboardEvent,
 } from "react";
 import { CATEGORIES, categoryFor } from "../../config/categories";
-import { createAddDraft, toAddRequest, type AddDraft } from "../../lib/addDraft";
+import {
+  createAddDraft,
+  toAddRequest,
+  type AddDraft,
+} from "../../lib/addDraft";
+import type { DeepLinkRequest } from "../../lib/deeplink";
 import {
   inspectUrl,
   normalizeClipboardUrl,
@@ -27,6 +33,7 @@ import {
   urlKey,
   type UrlFileInfo,
 } from "../../lib/fileMeta";
+import { formatBytes } from "../../lib/format";
 import {
   addTask,
   describeError,
@@ -92,15 +99,79 @@ function taskStatusLabel(status: string): string {
   return status;
 }
 
+function handoffKindLabel(kind: DeepLinkRequest["kind"]): string {
+  if (kind === "video") return "Video";
+  if (kind === "audio") return "Audio";
+  return "File";
+}
+
+function BrowserHandoffBanner({
+  handoff,
+}: {
+  readonly handoff: DeepLinkRequest;
+}) {
+  const hint = [
+    handoff.name,
+    handoff.size === null ? null : formatBytes(handoff.size),
+  ]
+    .filter((value): value is string => value !== null && value !== "")
+    .join(" · ");
+
+  return (
+    <section className="rounded-xl border border-sky-500/25 bg-sky-500/[0.055] px-3.5 py-3">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-sky-400/25 bg-sky-500/10 text-sky-300">
+          <Globe2 size={16} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200">
+              <Globe2 size={10} strokeWidth={2} />
+              Sent from browser
+            </span>
+            <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-zinc-400">
+              {handoffKindLabel(handoff.kind)}
+            </span>
+          </div>
+          {hint !== "" && (
+            <p
+              className="mt-1.5 truncate text-[12px] text-zinc-300"
+              title={hint}
+            >
+              Browser suggests: {hint}
+            </p>
+          )}
+          {handoff.sourcePage !== null && (
+            <p
+              className="mt-0.5 truncate text-[11px] text-zinc-500"
+              title={handoff.sourcePage}
+            >
+              From {handoff.sourcePage}
+            </p>
+          )}
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+            Review the destination and transfer options, then add the download.
+            RAPIDS confirms the file name when the transfer starts.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function AddDownloadDialog({
   onClose,
   initialUrl,
+  handoff,
 }: {
   readonly onClose: () => void;
   readonly initialUrl?: string;
+  readonly handoff?: DeepLinkRequest;
 }) {
   const inFlight = useRef(false);
-  const [draft, setDraft] = useState<AddDraft>(() => initialDraft(initialUrl));
+  const [draft, setDraft] = useState<AddDraft>(() =>
+    initialDraft(initialUrl ?? handoff?.url),
+  );
   const [defaults, setDefaults] = useState<Settings | null>(null);
   const [systemDownloads, setSystemDownloads] = useState("");
   const [schedules, setSchedules] = useState<readonly ScheduleView[]>([]);
@@ -143,7 +214,8 @@ export function AddDownloadDialog({
     );
   }, [draft.url, info.valid, tasks]);
   const selectedSchedule =
-    schedules.find((schedule) => String(schedule.id) === draft.scheduleId) ?? null;
+    schedules.find((schedule) => String(schedule.id) === draft.scheduleId) ??
+    null;
 
   useEffect(() => {
     let active = true;
@@ -153,7 +225,8 @@ export function AddDownloadDialog({
       listSchedules(),
     ]).then(([settingsResult, dirResult, schedulesResult]) => {
       if (!active) return;
-      if (settingsResult.status === "fulfilled") setDefaults(settingsResult.value);
+      if (settingsResult.status === "fulfilled")
+        setDefaults(settingsResult.value);
       if (dirResult.status === "fulfilled") setSystemDownloads(dirResult.value);
       if (schedulesResult.status === "fulfilled") {
         setSchedules(schedulesResult.value);
@@ -164,7 +237,10 @@ export function AddDownloadDialog({
     };
   }, []);
 
-  function change<K extends keyof AddDraft>(field: K, value: AddDraft[K]): void {
+  function change<K extends keyof AddDraft>(
+    field: K,
+    value: AddDraft[K],
+  ): void {
     setDraft((current) => ({ ...current, [field]: value }));
     setError(null);
   }
@@ -189,7 +265,9 @@ export function AddDownloadDialog({
 
   function requestClose(): void {
     if (inFlight.current) {
-      setError("The download request is being added. Wait for its result before closing.");
+      setError(
+        "The download request is being added. Wait for its result before closing.",
+      );
       return;
     }
     onClose();
@@ -200,7 +278,10 @@ export function AddDownloadDialog({
     setBrowsing(true);
     setError(null);
     try {
-      const folder = await pickFolder(effectiveDest, "Choose a download folder");
+      const folder = await pickFolder(
+        effectiveDest,
+        "Choose a download folder",
+      );
       if (folder !== null) {
         setDraft((current) => ({ ...current, destDir: folder }));
       }
@@ -254,24 +335,28 @@ export function AddDownloadDialog({
       return;
     }
     if (info.fileName === null) {
-      setError("This link does not name a file. Use a direct file link, or open the page with Inspect a media page.");
+      setError(
+        "This link does not name a file. Use a direct file link, or open the page with Inspect a media page.",
+      );
       return;
     }
     if (info.isStreaming) {
-      setError("This is a streaming manifest. RAPIDS only saves direct files; open the page with Inspect a media page for media review.");
+      setError(
+        "This is a streaming manifest. RAPIDS only saves direct files; open the page with Inspect a media page for media review.",
+      );
       return;
     }
     if (duplicate !== null && !allowDuplicate) {
-      setError("This link is already in your library. Tick Add another copy to continue.");
+      setError(
+        "This link is already in your library. Tick Add another copy to continue.",
+      );
       return;
     }
 
     const requestDraft: AddDraft = {
       ...draft,
       destDir:
-        draft.destDir.trim() !== ""
-          ? draft.destDir
-          : (categoryDest ?? ""),
+        draft.destDir.trim() !== "" ? draft.destDir : (categoryDest ?? ""),
     };
     let request;
     try {
@@ -290,7 +375,9 @@ export function AddDownloadDialog({
       inFlight.current = false;
       setSubmitting(false);
       refresh();
-      setError(`${describeError(cause)} Check the task list before trying again.`);
+      setError(
+        `${describeError(cause)} Check the task list before trying again.`,
+      );
       return;
     }
     inFlight.current = false;
@@ -312,16 +399,15 @@ export function AddDownloadDialog({
     }
   }
 
-  const blockedReason =
-    !info.valid
-      ? "Enter a complete HTTP or HTTPS link."
-      : info.fileName === null
-        ? "This link does not name a file. Use a direct file link."
-        : info.isStreaming
-          ? "Streaming manifests cannot be added as direct files."
-          : duplicate !== null && !allowDuplicate
-            ? "Tick Add another copy to add this link again."
-            : null;
+  const blockedReason = !info.valid
+    ? "Enter a complete HTTP or HTTPS link."
+    : info.fileName === null
+      ? "This link does not name a file. Use a direct file link."
+      : info.isStreaming
+        ? "Streaming manifests cannot be added as direct files."
+        : duplicate !== null && !allowDuplicate
+          ? "Tick Add another copy to add this link again."
+          : null;
 
   return (
     <DialogWindow
@@ -352,6 +438,9 @@ export function AddDownloadDialog({
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           <div className="mx-auto flex w-full max-w-[54rem] flex-col gap-5">
+            {handoff !== undefined && (
+              <BrowserHandoffBanner handoff={handoff} />
+            )}
             <section>
               <div className="mb-1.5 flex items-center justify-between gap-3">
                 <label htmlFor="download-url" className={LABEL}>
@@ -400,7 +489,8 @@ export function AddDownloadDialog({
                 </button>
               </div>
               <p id="download-url-help" className={HELP}>
-                Paste or drop a link. RAPIDS saves the response exactly as the server sends it.
+                Paste or drop a link. RAPIDS saves the response exactly as the
+                server sends it.
               </p>
             </section>
 
@@ -419,15 +509,22 @@ export function AddDownloadDialog({
                     <Sparkles size={15} strokeWidth={1.7} />
                   </div>
                   <div>
-                    <p className="font-medium text-zinc-400">File details appear here</p>
+                    <p className="font-medium text-zinc-400">
+                      File details appear here
+                    </p>
                     <p className="mt-0.5 text-[11px] text-zinc-500">
-                      Name, type, and destination are read from the link before it is queued.
+                      Name, type, and destination are read from the link before
+                      it is queued.
                     </p>
                   </div>
                 </div>
               ) : !info.valid ? (
                 <div className="flex items-start gap-3 text-[12px] text-amber-200">
-                  <AlertTriangle size={15} className="mt-0.5 shrink-0" strokeWidth={1.8} />
+                  <AlertTriangle
+                    size={15}
+                    className="mt-0.5 shrink-0"
+                    strokeWidth={1.8}
+                  />
                   <p>{info.error}</p>
                 </div>
               ) : (
@@ -460,7 +557,9 @@ export function AddDownloadDialog({
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
                         <span>{info.typeLabel}</span>
-                        <span className="truncate" title={info.host}>{info.host}</span>
+                        <span className="truncate" title={info.host}>
+                          {info.host}
+                        </span>
                         <span>{category.label}</span>
                       </div>
                     </div>
@@ -470,7 +569,12 @@ export function AddDownloadDialog({
                       <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">
                         Destination
                       </p>
-                      <p className="mt-0.5 truncate text-[11px] text-zinc-300" title={effectiveDest || "Using the system Downloads folder"}>
+                      <p
+                        className="mt-0.5 truncate text-[11px] text-zinc-300"
+                        title={
+                          effectiveDest || "Using the system Downloads folder"
+                        }
+                      >
                         {effectiveDest || "System Downloads folder"}
                       </p>
                     </div>
@@ -483,7 +587,9 @@ export function AddDownloadDialog({
                       </p>
                     </div>
                   </div>
-                  {(info.isStreaming || info.isPageLike || info.extension === null) && (
+                  {(info.isStreaming ||
+                    info.isPageLike ||
+                    info.extension === null) && (
                     <p className="rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
                       {info.isStreaming
                         ? "This link points to a playlist, not one file. RAPIDS cannot merge streaming segments from a direct link; use Inspect a media page to review media the site exposes."
@@ -495,11 +601,19 @@ export function AddDownloadDialog({
                   {duplicate !== null && (
                     <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3.5 py-3 text-[12px] text-amber-100">
                       <div className="flex items-start gap-2">
-                        <AlertTriangle size={14} className="mt-0.5 shrink-0" strokeWidth={1.8} />
+                        <AlertTriangle
+                          size={14}
+                          className="mt-0.5 shrink-0"
+                          strokeWidth={1.8}
+                        />
                         <div className="min-w-0">
                           <p className="font-medium">Already in your library</p>
-                          <p className="mt-0.5 truncate text-[11px] text-amber-200/80" title={duplicate.destPath}>
-                            {duplicate.fileName} - {taskStatusLabel(duplicate.status)}
+                          <p
+                            className="mt-0.5 truncate text-[11px] text-amber-200/80"
+                            title={duplicate.destPath}
+                          >
+                            {duplicate.fileName} -{" "}
+                            {taskStatusLabel(duplicate.status)}
                           </p>
                           <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-amber-200/90">
                             <input
@@ -556,7 +670,8 @@ export function AddDownloadDialog({
                 </Button>
               </div>
               <p id="download-destination-help" className={HELP}>
-                Leave empty to use the default destination. Browse or type an absolute path to override it for this download.
+                Leave empty to use the default destination. Browse or type an
+                absolute path to override it for this download.
               </p>
             </section>
 
@@ -565,7 +680,8 @@ export function AddDownloadDialog({
                 <div>
                   <p className={LABEL}>Category</p>
                   <p className="-mt-1 text-[11px] text-zinc-500">
-                    Chosen automatically from the file type. Change it if needed.
+                    Chosen automatically from the file type. Change it if
+                    needed.
                   </p>
                 </div>
                 {categoryTouched && info.valid ? (
@@ -643,7 +759,11 @@ export function AddDownloadDialog({
                 onClick={() => setAdvancedOpen((open) => !open)}
                 className="flex w-full items-center gap-2 bg-panel/30 px-3.5 py-3 text-left transition-colors hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40"
               >
-                <ShieldCheck size={14} strokeWidth={1.8} className="text-zinc-500" />
+                <ShieldCheck
+                  size={14}
+                  strokeWidth={1.8}
+                  className="text-zinc-500"
+                />
                 <span className="flex-1 text-[12px] font-medium text-zinc-300">
                   Transfer options
                 </span>
@@ -670,7 +790,9 @@ export function AddDownloadDialog({
                       type="number"
                       step="1"
                       value={draft.priority}
-                      onChange={(event) => change("priority", event.target.value)}
+                      onChange={(event) =>
+                        change("priority", event.target.value)
+                      }
                       className={FIELD}
                     />
                     <p className={HELP}>Higher values start first.</p>
@@ -686,7 +808,9 @@ export function AddDownloadDialog({
                       max="32"
                       step="1"
                       value={draft.connections}
-                      onChange={(event) => change("connections", event.target.value)}
+                      onChange={(event) =>
+                        change("connections", event.target.value)
+                      }
                       aria-describedby="download-connections-help"
                       className={FIELD}
                     />
@@ -705,7 +829,9 @@ export function AddDownloadDialog({
                         min="1"
                         step="1"
                         value={draft.speedLimitBps}
-                        onChange={(event) => change("speedLimitBps", event.target.value)}
+                        onChange={(event) =>
+                          change("speedLimitBps", event.target.value)
+                        }
                         className={`${FIELD} pr-14`}
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500">
@@ -720,7 +846,9 @@ export function AddDownloadDialog({
                     <select
                       id="download-schedule"
                       value={draft.scheduleId}
-                      onChange={(event) => change("scheduleId", event.target.value)}
+                      onChange={(event) =>
+                        change("scheduleId", event.target.value)
+                      }
                       className={FIELD}
                     >
                       <option value="">Start immediately</option>
@@ -748,21 +876,25 @@ export function AddDownloadDialog({
                       type="text"
                       spellCheck={false}
                       value={draft.expectedSha256}
-                      onChange={(event) => change("expectedSha256", event.target.value)}
+                      onChange={(event) =>
+                        change("expectedSha256", event.target.value)
+                      }
                       aria-describedby="download-sha256-help"
                       className={`${FIELD} font-mono text-[12px]`}
                     />
                     <p id="download-sha256-help" className={HELP}>
-                      Optional. Verify the received file against a 64-character checksum.
+                      Optional. Verify the received file against a 64-character
+                      checksum.
                     </p>
                   </div>
                   <p className="rounded-lg border border-line/70 bg-canvas/40 px-3 py-2 text-[11px] leading-relaxed text-zinc-500 sm:col-span-2">
-                    Per-download sign-in, browser cookies, and streaming extraction are not available for direct transfers. Use Inspect a media page for media the browser can expose.
+                    Per-download sign-in, browser cookies, and streaming
+                    extraction are not available for direct transfers. Use
+                    Inspect a media page for media the browser can expose.
                   </p>
                 </div>
               )}
             </section>
-
           </div>
         </div>
 
@@ -790,7 +922,11 @@ export function AddDownloadDialog({
               </kbd>{" "}
               to close
             </p>
-            <Button variant="ghost" onClick={requestClose} disabled={submitting}>
+            <Button
+              variant="ghost"
+              onClick={requestClose}
+              disabled={submitting}
+            >
               Cancel
             </Button>
             <Button

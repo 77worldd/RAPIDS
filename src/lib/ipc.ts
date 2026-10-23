@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { parsePendingDeepLink, type PendingDeepLink } from "./deeplink";
 import { toInspectorUrl, toSniffCandidate } from "./sniff";
 import type {
   AppInfo,
@@ -158,7 +159,9 @@ async function checked<T>(
 ): Promise<T> {
   const result: unknown = await invoke(command, args);
   if (!isValue(result)) {
-    throw new Error(`The download service returned an invalid ${command} reply.`);
+    throw new Error(
+      `The download service returned an invalid ${command} reply.`,
+    );
   }
   return result;
 }
@@ -168,16 +171,19 @@ function send(command: string, args?: Record<string, unknown>): Promise<void> {
 }
 
 export function fetchAppInfo(): Promise<AppInfo> {
-  return checked("app_version", (value): value is AppInfo =>
-    isRecord(value) &&
-    typeof value.name === "string" &&
-    typeof value.version === "string",
+  return checked(
+    "app_version",
+    (value): value is AppInfo =>
+      isRecord(value) &&
+      typeof value.name === "string" &&
+      typeof value.version === "string",
   );
 }
 
 export function fetchDownloadDefaultDir(): Promise<string> {
-  return checked("download_default_dir", (value): value is string =>
-    typeof value === "string" && value !== "",
+  return checked(
+    "download_default_dir",
+    (value): value is string => typeof value === "string" && value !== "",
   );
 }
 
@@ -231,8 +237,9 @@ export function resumeQueue(): Promise<void> {
 }
 
 export function queuePaused(): Promise<boolean> {
-  return checked("queue_paused", (value): value is boolean =>
-    typeof value === "boolean",
+  return checked(
+    "queue_paused",
+    (value): value is boolean => typeof value === "boolean",
   );
 }
 
@@ -240,7 +247,10 @@ export function getSettings(): Promise<Settings> {
   return checked("settings_get", isSettings);
 }
 
-export function updateSetting(name: SettingName, value: unknown): Promise<Settings> {
+export function updateSetting(
+  name: SettingName,
+  value: unknown,
+): Promise<Settings> {
   return checked("settings_update", isSettings, { name, value });
 }
 
@@ -249,11 +259,16 @@ export async function listSchedules(): Promise<readonly ScheduleView[]> {
   return listOf(result, isSchedule, "schedule list");
 }
 
-export function createSchedule(input: ScheduleCreateInput): Promise<ScheduleView> {
+export function createSchedule(
+  input: ScheduleCreateInput,
+): Promise<ScheduleView> {
   return checked("schedule_create", isSchedule, { input });
 }
 
-export function setScheduleEnabled(id: number, enabled: boolean): Promise<void> {
+export function setScheduleEnabled(
+  id: number,
+  enabled: boolean,
+): Promise<void> {
   return send("schedule_set_enabled", { id, enabled });
 }
 
@@ -269,7 +284,9 @@ function toHostEvent(value: unknown): HostEvent | null {
   if (!isRecord(value)) return null;
   switch (value.kind) {
     case "taskChanged":
-      return isTask(value.task) ? { kind: "taskChanged", task: value.task } : null;
+      return isTask(value.task)
+        ? { kind: "taskChanged", task: value.task }
+        : null;
     case "taskRemoved":
       return isId(value.id) ? { kind: "taskRemoved", id: value.id } : null;
     case "progress":
@@ -303,7 +320,9 @@ export async function subscribeHostEvents(
         if (event !== null && event.kind === kind) {
           onEvent(event);
         } else {
-          onError(new Error(`The download service sent an invalid ${channel} event.`));
+          onError(
+            new Error(`The download service sent an invalid ${channel} event.`),
+          );
         }
       });
       unlisten.push(off);
@@ -331,8 +350,51 @@ export async function subscribeSniffCandidates(
   });
 }
 
+/**
+ * The host queues both warm and cold links. Draining is atomic, so this is the
+ * single authoritative path; browser events only wake the bridge to drain again.
+ */
+export async function takePendingDeepLinks(): Promise<
+  readonly PendingDeepLink[]
+> {
+  const result: unknown = await invoke("deeplink_take_pending");
+  if (!Array.isArray(result)) {
+    throw new Error(
+      "The download service returned an invalid browser handoff queue.",
+    );
+  }
+  const pending: PendingDeepLink[] = [];
+  for (const entry of result) {
+    const parsed = parsePendingDeepLink(entry);
+    if (parsed !== null) pending.push(parsed);
+  }
+  return pending;
+}
+
+const DEEP_LINK_CHANNELS = ["deeplink://add", "deeplink://error"] as const;
+
+/** Payloads are ignored by design; the bridge re-reads the validated queue. */
+export async function subscribeDeepLinkSignals(
+  onSignal: () => void,
+): Promise<UnlistenFn> {
+  const unlisten: UnlistenFn[] = [];
+  try {
+    for (const channel of DEEP_LINK_CHANNELS) {
+      const off = await listen(channel, () => onSignal());
+      unlisten.push(off);
+    }
+    return () => {
+      for (const off of unlisten) off();
+    };
+  } catch (error) {
+    for (const off of unlisten) off();
+    throw error;
+  }
+}
+
 export function describeError(error: unknown): string {
   if (typeof error === "string" && error.trim() !== "") return error;
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
+  if (error instanceof Error && error.message.trim() !== "")
+    return error.message;
   return "The download service did not respond.";
 }

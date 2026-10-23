@@ -24,7 +24,9 @@ import {
 import { pickFolder } from "../../lib/native";
 import {
   readCategoryDirs,
+  readDeepLinkConfirm,
   writeCategoryDirs,
+  writeDeepLinkConfirm,
   type CategoryDirs,
 } from "../../lib/preferences";
 import type {
@@ -124,7 +126,9 @@ function scheduleKindLabel(kind: ScheduleView["kind"]): string {
 }
 
 function weekdayNames(mask: number): string {
-  const selected = WEEKDAYS.filter((day) => mask & day.bit).map((day) => day.label);
+  const selected = WEEKDAYS.filter((day) => mask & day.bit).map(
+    (day) => day.label,
+  );
   if (selected.length === 0) return "No days selected";
   if (selected.length === 7) return "Every day";
   return selected.join(", ");
@@ -162,7 +166,10 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
   const [tab, setTab] = useState<TabId>("general");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
-  const [categoryDirs, setCategoryDirs] = useState<CategoryDirs>(readCategoryDirs);
+  const [categoryDirs, setCategoryDirs] =
+    useState<CategoryDirs>(readCategoryDirs);
+  const [confirmBrowserLinks, setConfirmBrowserLinks] =
+    useState(readDeepLinkConfirm);
   const [schedules, setSchedules] = useState<readonly ScheduleView[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -226,20 +233,26 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
       draft.resumeOnStart !== settings.resumeOnStart ||
       draft.retryMaxAttempts !== String(settings.retryMaxAttempts) ||
       draft.defaultDestDir !== settings.defaultDestDir ||
-      JSON.stringify(categoryDirs) !== JSON.stringify(readCategoryDirs())
+      JSON.stringify(categoryDirs) !== JSON.stringify(readCategoryDirs()) ||
+      confirmBrowserLinks !== readDeepLinkConfirm()
     );
-  }, [categoryDirs, draft, settings]);
+  }, [categoryDirs, confirmBrowserLinks, draft, settings]);
 
   function updateDraft<K extends keyof SettingsDraft>(
     key: K,
     value: SettingsDraft[K],
   ): void {
-    setDraft((current) => (current === null ? current : { ...current, [key]: value }));
+    setDraft((current) =>
+      current === null ? current : { ...current, [key]: value },
+    );
     setError(null);
     setSaved(null);
   }
 
-  function updateCategoryDir(categoryId: keyof CategoryDirs, value: string): void {
+  function updateCategoryDir(
+    categoryId: keyof CategoryDirs,
+    value: string,
+  ): void {
     setCategoryDirs((current) => {
       const next: CategoryDirs = { ...current };
       if (value.trim() === "") {
@@ -292,7 +305,12 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
     setError(null);
     setSaved(null);
     try {
-      const maxParallel = integerInRange(draft.maxParallel, "Parallel downloads", 1, 32);
+      const maxParallel = integerInRange(
+        draft.maxParallel,
+        "Parallel downloads",
+        1,
+        32,
+      );
       const maxConnections = integerInRange(
         draft.maxConnections,
         "Connection budget",
@@ -336,6 +354,7 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
         latest = await updateSetting(name, value);
       }
       writeCategoryDirs(categoryDirs);
+      writeDeepLinkConfirm(confirmBrowserLinks);
       setSettings(latest);
       setDraft(draftFrom(latest));
       setSaved("Settings saved. New transfers use the updated limits.");
@@ -406,7 +425,11 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
   }
 
   async function removeSchedule(schedule: ScheduleView): Promise<void> {
-    if (!window.confirm(`Delete “${schedule.label}”? Downloads already queued keep running.`)) {
+    if (
+      !window.confirm(
+        `Delete “${schedule.label}”? Downloads already queued keep running.`,
+      )
+    ) {
       return;
     }
     setScheduleBusy(schedule.id);
@@ -465,7 +488,11 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
             <div className="mb-4 flex items-center gap-2">
-              <TabIcon size={15} strokeWidth={1.8} className="text-emerald-400" />
+              <TabIcon
+                size={15}
+                strokeWidth={1.8}
+                className="text-emerald-400"
+              />
               <h3 className="text-[13px] font-semibold text-zinc-100">
                 {TABS.find((entry) => entry.id === tab)?.label}
               </h3>
@@ -500,12 +527,16 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
                 onDraft={updateDraft}
                 onBrowse={() => void browseDefault()}
                 browsing={browsing}
+                confirmBrowserLinks={confirmBrowserLinks}
+                onConfirmBrowserLinks={setConfirmBrowserLinks}
               />
             ) : tab === "folders" ? (
               <FoldersPanel
                 categoryDirs={categoryDirs}
                 onChange={updateCategoryDir}
-                onBrowse={(categoryId, current) => void browseCategory(categoryId, current)}
+                onBrowse={(categoryId, current) =>
+                  void browseCategory(categoryId, current)
+                }
                 browsing={browsing}
               />
             ) : tab === "transfers" ? (
@@ -583,6 +614,8 @@ function GeneralPanel({
   onDraft,
   onBrowse,
   browsing,
+  confirmBrowserLinks,
+  onConfirmBrowserLinks,
 }: {
   readonly draft: SettingsDraft;
   readonly onDraft: <K extends keyof SettingsDraft>(
@@ -591,6 +624,8 @@ function GeneralPanel({
   ) => void;
   readonly onBrowse: () => void;
   readonly browsing: boolean;
+  readonly confirmBrowserLinks: boolean;
+  readonly onConfirmBrowserLinks: (checked: boolean) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -607,20 +642,28 @@ function GeneralPanel({
             spellCheck={false}
             className={FIELD}
           />
-          <Button variant="secondary" size="sm" onClick={onBrowse} disabled={browsing}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onBrowse}
+            disabled={browsing}
+          >
             <FolderCog size={14} strokeWidth={1.8} />
             {browsing ? "Choosing" : "Browse"}
           </Button>
         </div>
         <p className={HELP}>
-          Leave empty to use the operating system&apos;s Downloads folder. Category folders can override this.
+          Leave empty to use the operating system&apos;s Downloads folder.
+          Category folders can override this.
         </p>
       </section>
 
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-[12px] font-medium text-zinc-200">Resume queue on launch</p>
+            <p className="text-[12px] font-medium text-zinc-200">
+              Resume queue on launch
+            </p>
             <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
               Continue unfinished transfers when RAPIDS starts.
             </p>
@@ -631,6 +674,34 @@ function GeneralPanel({
             label="Resume queue on launch"
           />
         </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-panel/30 p-3.5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[12px] font-medium text-zinc-200">
+              Ask before adding links sent from the browser
+            </p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+              Browser handoffs open the Add download sheet for review. Turn this
+              off to queue them immediately.
+            </p>
+          </div>
+          <Toggle
+            checked={confirmBrowserLinks}
+            onChange={onConfirmBrowserLinks}
+            label="Ask before adding links sent from the browser"
+          />
+        </div>
+        {!confirmBrowserLinks && (
+          <p
+            role="status"
+            className="mt-2.5 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2.5 py-2 text-[11px] leading-relaxed text-amber-200/90"
+          >
+            Links opened by web pages or the browser extension will be added
+            without showing the confirmation sheet.
+          </p>
+        )}
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2">
@@ -683,7 +754,8 @@ function GeneralPanel({
           className={`${FIELD} max-w-40`}
         />
         <p className={HELP}>
-          Failed transfers retry with a growing delay. Zero disables automatic retries.
+          Failed transfers retry with a growing delay. Zero disables automatic
+          retries.
         </p>
       </section>
     </div>
@@ -704,14 +776,18 @@ function FoldersPanel({
   return (
     <div className="space-y-3">
       <p className="text-[11.5px] leading-relaxed text-zinc-500">
-        Category folders are optional. When set, they take precedence over the default folder for new downloads in that category.
+        Category folders are optional. When set, they take precedence over the
+        default folder for new downloads in that category.
       </p>
       <div className="divide-y divide-line/70 rounded-lg border border-line">
         {CATEGORIES.map((category) => {
           const Icon = category.icon;
           const value = categoryDirs[category.id] ?? "";
           return (
-            <div key={category.id} className="flex items-center gap-2 px-3 py-2.5">
+            <div
+              key={category.id}
+              className="flex items-center gap-2 px-3 py-2.5"
+            >
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-zinc-400">
                 <Icon size={14} strokeWidth={1.8} />
               </span>
@@ -727,7 +803,9 @@ function FoldersPanel({
                   type="text"
                   value={value}
                   spellCheck={false}
-                  onChange={(event) => onChange(category.id, event.target.value)}
+                  onChange={(event) =>
+                    onChange(category.id, event.target.value)
+                  }
                   className="mt-1 h-7 w-full rounded-md border border-line bg-canvas/50 px-2 text-[11px] text-zinc-200 outline-none transition-colors focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20"
                 />
               </div>
@@ -779,21 +857,26 @@ function TransfersPanel({
           </span>
         </div>
         <p className={HELP}>
-          Leave empty for no global ceiling. Per-download ceilings can be set in Add download.
+          Leave empty for no global ceiling. Per-download ceilings can be set in
+          Add download.
         </p>
       </section>
 
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
-        <p className="text-[12px] font-medium text-zinc-200">What the queue controls</p>
+        <p className="text-[12px] font-medium text-zinc-200">
+          What the queue controls
+        </p>
         <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-500">
-          Pausing the queue stops new transfers from starting. Transfers already in progress keep running until they finish, pause, or are cancelled.
+          Pausing the queue stops new transfers from starting. Transfers already
+          in progress keep running until they finish, pause, or are cancelled.
         </p>
       </section>
 
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
         <p className="text-[12px] font-medium text-zinc-200">Retry schedule</p>
         <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-500">
-          RAPIDS waits five seconds after the first failure, then doubles the delay up to five minutes. The retry count is set in General.
+          RAPIDS waits five seconds after the first failure, then doubles the
+          delay up to five minutes. The retry count is set in General.
         </p>
       </section>
     </div>
@@ -846,7 +929,9 @@ function SchedulesPanel({
       <section>
         <div className="mb-2 flex items-center justify-between gap-3">
           <div>
-            <p className="text-[12px] font-medium text-zinc-200">Start windows</p>
+            <p className="text-[12px] font-medium text-zinc-200">
+              Start windows
+            </p>
             <p className="mt-0.5 text-[11px] text-zinc-500">
               Assign a window to a download from its Transfer options.
             </p>
@@ -854,12 +939,16 @@ function SchedulesPanel({
         </div>
         {schedules.length === 0 ? (
           <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[11.5px] text-zinc-500">
-            No start windows yet. Add one below to hold new downloads until a chosen time.
+            No start windows yet. Add one below to hold new downloads until a
+            chosen time.
           </p>
         ) : (
           <ul className="divide-y divide-line/70 overflow-hidden rounded-lg border border-line">
             {schedules.map((schedule) => (
-              <li key={schedule.id} className="flex items-center gap-3 px-3 py-2.5">
+              <li
+                key={schedule.id}
+                className="flex items-center gap-3 px-3 py-2.5"
+              >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-300">
                   <CalendarClock size={14} strokeWidth={1.8} />
                 </span>
@@ -964,7 +1053,8 @@ function SchedulesPanel({
                 })}
               </div>
               <p className={HELP}>
-                The opening time repeats on each selected day. Choose at least one.
+                The opening time repeats on each selected day. Choose at least
+                one.
               </p>
             </div>
           )}
@@ -999,14 +1089,22 @@ function SchedulesPanel({
                 minutes
               </span>
             </div>
-            <p className={HELP}>Zero keeps the window open until its next start.</p>
+            <p className={HELP}>
+              Zero keeps the window open until its next start.
+            </p>
           </div>
           <div className="flex items-end justify-between gap-3 pb-1">
             <div>
               <p className="text-[12px] font-medium text-zinc-300">Enabled</p>
-              <p className="mt-0.5 text-[11px] text-zinc-500">Ready for new downloads.</p>
+              <p className="mt-0.5 text-[11px] text-zinc-500">
+                Ready for new downloads.
+              </p>
             </div>
-            <Toggle checked={newEnabled} onChange={onEnabled} label="Enable new start window" />
+            <Toggle
+              checked={newEnabled}
+              onChange={onEnabled}
+              label="Enable new start window"
+            />
           </div>
         </div>
         <div className="mt-3 flex items-center justify-end">
@@ -1023,7 +1121,10 @@ function SchedulesPanel({
           </Button>
         </div>
         {error !== null && (
-          <p role="alert" className="mt-2 text-[11px] leading-relaxed text-red-300">
+          <p
+            role="alert"
+            className="mt-2 text-[11px] leading-relaxed text-red-300"
+          >
             {error}
           </p>
         )}

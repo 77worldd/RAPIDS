@@ -3,10 +3,12 @@ import { isAbsoluteFolder } from "./addDraft";
 
 const CATEGORY_DIRS_KEY = "rapids.categoryDirs.v1";
 const WORKSPACE_KEY = "rapids.workspace.v1";
+const DEEP_LINK_CONFIRM_KEY = "rapids.deeplinkConfirm.v1";
 
 export type CategoryDirs = Partial<Record<TagId, string>>;
 
-export type SortKey = "newest" | "oldest" | "name" | "size" | "progress" | "status";
+export type SortKey =
+  "newest" | "oldest" | "name" | "size" | "progress" | "status";
 
 export interface WorkspacePrefs {
   readonly sort: SortKey;
@@ -29,7 +31,11 @@ export function readCategoryDirs(): CategoryDirs {
     const raw = localStorage.getItem(CATEGORY_DIRS_KEY);
     if (raw === null) return {};
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return {};
     }
     const result: CategoryDirs = {};
@@ -69,7 +75,11 @@ export function readWorkspacePrefs(): WorkspacePrefs {
     const raw = localStorage.getItem(WORKSPACE_KEY);
     if (raw === null) return fallback;
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return fallback;
     }
     const sort = (parsed as { sort?: unknown }).sort;
@@ -94,6 +104,23 @@ export function writeWorkspacePrefs(prefs: WorkspacePrefs): void {
     localStorage.setItem(WORKSPACE_KEY, JSON.stringify(prefs));
   } catch {
     // Storage can be unavailable; sorting still works for this session.
+  }
+}
+
+/** Browser links require confirmation unless the user explicitly opts out. */
+export function readDeepLinkConfirm(): boolean {
+  try {
+    return localStorage.getItem(DEEP_LINK_CONFIRM_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+export function writeDeepLinkConfirm(confirm: boolean): void {
+  try {
+    localStorage.setItem(DEEP_LINK_CONFIRM_KEY, confirm ? "true" : "false");
+  } catch {
+    // Storage can be unavailable; the in-memory setting still applies.
   }
 }
 
