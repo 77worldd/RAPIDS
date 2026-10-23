@@ -10,6 +10,8 @@
     "test:add-draft": "node --experimental-strip-types --test tests/add-draft.test.mjs",
     "test:file-meta": "node --experimental-strip-types --test tests/file-meta.test.mjs",
     "test:sniff": "node --experimental-strip-types --test tests/sniff.test.mjs",
+    "test:deeplink": "node --experimental-strip-types --test tests/deeplink.test.mjs",
+    "test:extension": "node --test tests/extension-handoff.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "gate:content": "node scripts/content-gate.mjs",

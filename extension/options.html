@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAPIDS browser extension options</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div class="brand">
+          <img
+            class="mark"
+            src="icons/icon48.png"
+            width="38"
+            height="38"
+            alt=""
+          />
+          <div>
+            <span class="eyebrow">Browser handoff</span>
+            <h1>RAPIDS</h1>
+            <p class="tagline">
+              Send media and large files straight to your download manager.
+            </p>
+          </div>
+        </div>
+        <span class="version" id="version"></span>
+      </header>
+
+      <main>
+        <section class="card">
+          <h2>Connect RAPIDS</h2>
+          <p>
+            The first time the extension opens RAPIDS, Chrome or Edge asks
+            whether to allow <code>rapids://</code> links. Choose
+            <strong>Always allow</strong>
+            (or the equivalent) so later handoffs open the desktop app without
+            the prompt. That browser permission is the connection grant.
+          </p>
+          <p>
+            Keep RAPIDS installed for the current user. If the app is closed,
+            the browser starts it and the link opens the Add download sheet.
+          </p>
+          <div class="actions">
+            <button class="primary" id="test" type="button">
+              Test RAPIDS connection
+            </button>
+            <code class="test-url"
+              >download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov</code
+            >
+          </div>
+          <p class="status" id="test-status" role="status"></p>
+          <p class="note">
+            The test sends a small confirmation handoff, not a download. Accept
+            the browser prompt and check that RAPIDS shows the prefilled Add
+            download sheet.
+          </p>
+        </section>
+
+        <section class="card">
+          <h2>Sniffing</h2>
+          <form id="options-form">
+            <div class="row">
+              <div class="row-copy">
+                <label for="threshold"
+                  ><strong>Large-file threshold</strong></label
+                >
+                <small>
+                  Responses at least this large are listed even when their type
+                  is not recognizable. Default: 1 MB.
+                </small>
+              </div>
+              <div class="number-field">
+                <input
+                  id="threshold"
+                  type="number"
+                  min="1"
+                  max="1024"
+                  step="1"
+                  inputmode="numeric"
+                  required
+                />
+                <span>MB</span>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="row-copy">
+                <span class="row-title"
+                  ><strong>Scan every page automatically</strong></span
+                >
+                <small>
+                  Scan direct links when a page finishes loading. Off by
+                  default; the popup button always works without it.
+                </small>
+              </div>
+              <label class="switch">
+                <input id="auto-scan" type="checkbox" />
+                <span class="track" aria-hidden="true"></span>
+                <span class="sr-only">Scan every page automatically</span>
+              </label>
+            </div>
+
+            <div class="save-row">
+              <span class="status" id="save-status" role="status"></span>
+              <button class="primary" type="submit">Save changes</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>How it works</h2>
+          <ul class="points">
+            <li>
+              The extension watches completed HTTP responses for media types,
+              media file extensions, and large files. It also scans links and
+              media elements on demand.
+            </li>
+            <li>
+              Each tab keeps at most 200 candidates for 30 minutes. Fragments
+              are ignored when deciding whether two links are the same.
+            </li>
+            <li>
+              A handoff is a normal <code>rapids://add</code> deep link with the
+              download URL, a suggested name, the media type, the source page,
+              and the size when known. RAPIDS always requires its own
+              confirmation by default.
+            </li>
+            <li>
+              If a page cannot run the script (browser pages, the extension
+              store, or a PDF viewer), the extension opens a temporary tab, lets
+              the browser show the RAPIDS prompt, and closes the tab after a few
+              seconds.
+            </li>
+          </ul>
+        </section>
+      </main>
+
+      <footer>
+        <span>Local only. No analytics, remote scripts, or hosted assets.</span>
+        <span>Deep link protocol v1</span>
+      </footer>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

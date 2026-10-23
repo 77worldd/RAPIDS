@@ -21,6 +21,17 @@ export default tseslint.config(
     },
   },
   {
+    files: ["extension/**/*.js"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.webextensions,
+        ...globals.serviceworker,
+        RapidsHandoff: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     extends: [
       js.configs.recommended,
