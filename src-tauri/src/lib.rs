@@ -1,16 +1,26 @@
 mod adapter;
 mod commands;
+mod deeplink;
 mod platform;
 mod sniff;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            deeplink::focus(app);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(adapter::setup)
+        .setup(|app| {
+            adapter::setup(app)?;
+            deeplink::setup(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            deeplink::deeplink_take_pending,
             commands::download_default_dir,
             commands::open_download_file,
             commands::tasks_list,
