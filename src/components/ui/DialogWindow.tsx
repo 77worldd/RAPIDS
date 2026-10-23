@@ -59,7 +59,10 @@ function initialRect(
   const screen = viewport();
   const availableWidth = Math.max(320, screen.width - VIEWPORT_GAP * 2);
   const availableHeight = Math.max(320, screen.height - VIEWPORT_GAP * 2);
-  const nextWidth = Math.min(Math.max(width, Math.min(minWidth, availableWidth)), availableWidth);
+  const nextWidth = Math.min(
+    Math.max(width, Math.min(minWidth, availableWidth)),
+    availableWidth,
+  );
   const nextHeight = Math.min(
     Math.max(height, Math.min(minHeight, availableHeight)),
     availableHeight,
@@ -84,13 +87,29 @@ function constrainedRect(
   const screen = viewport();
   const maximumWidth = Math.max(320, screen.width - VIEWPORT_MARGIN * 2);
   const maximumHeight = Math.max(320, screen.height - VIEWPORT_MARGIN * 2);
-  const width = clamp(rect.width, Math.min(minWidth, maximumWidth), maximumWidth);
-  const height = clamp(rect.height, Math.min(minHeight, maximumHeight), maximumHeight);
+  const width = clamp(
+    rect.width,
+    Math.min(minWidth, maximumWidth),
+    maximumWidth,
+  );
+  const height = clamp(
+    rect.height,
+    Math.min(minHeight, maximumHeight),
+    maximumHeight,
+  );
   return {
     width,
     height,
-    x: clamp(rect.x, VIEWPORT_MARGIN, Math.max(VIEWPORT_MARGIN, screen.width - width - VIEWPORT_MARGIN)),
-    y: clamp(rect.y, VIEWPORT_MARGIN, Math.max(VIEWPORT_MARGIN, screen.height - height - VIEWPORT_MARGIN)),
+    x: clamp(
+      rect.x,
+      VIEWPORT_MARGIN,
+      Math.max(VIEWPORT_MARGIN, screen.width - width - VIEWPORT_MARGIN),
+    ),
+    y: clamp(
+      rect.y,
+      VIEWPORT_MARGIN,
+      Math.max(VIEWPORT_MARGIN, screen.height - height - VIEWPORT_MARGIN),
+    ),
   };
 }
 
@@ -136,7 +155,9 @@ function resizedRect(
 function isInteractive(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
-    target.closest("button, a, input, textarea, select, label, [data-no-drag]") !== null
+    target.closest(
+      "button, a, input, textarea, select, label, [data-no-drag]",
+    ) !== null
   );
 }
 
@@ -309,7 +330,7 @@ export function DialogWindow({
   return createPortal(
     <div
       className={cn(
-        "fixed inset-0 z-[100] bg-zinc-950/75 backdrop-blur-[2px] rapids-dialog-backdrop",
+        "fixed inset-0 z-[100] bg-canvas/75 backdrop-blur-[2px] rapids-dialog-backdrop",
         interacting && "cursor-default",
       )}
       onMouseDown={(event) => {
@@ -323,10 +344,12 @@ export function DialogWindow({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        {...(description !== undefined ? { "aria-describedby": descriptionId } : {})}
+        {...(description !== undefined
+          ? { "aria-describedby": descriptionId }
+          : {})}
         style={style}
         className={cn(
-          "fixed flex flex-col overflow-hidden rounded-xl border border-line bg-panel text-zinc-100 shadow-[0_28px_90px_-18px_rgba(0,0,0,0.85)] rapids-dialog-enter",
+          "fixed flex flex-col overflow-hidden rounded-xl border border-line bg-panel text-ink shadow-[0_28px_90px_-18px_rgba(0,0,0,0.85)] rapids-dialog-enter",
           interacting && "select-none",
         )}
       >
@@ -335,16 +358,22 @@ export function DialogWindow({
           className="flex min-h-14 shrink-0 cursor-grab items-center gap-3 border-b border-line/80 px-4 py-3 active:cursor-grabbing"
         >
           {icon !== undefined && (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink/10 text-ink-soft">
               {icon}
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="truncate text-[14px] font-semibold tracking-[-0.01em] text-zinc-50">
+            <h2
+              id={titleId}
+              className="truncate text-[14px] font-semibold tracking-[-0.01em] text-ink"
+            >
               {title}
             </h2>
             {description !== undefined && (
-              <p id={descriptionId} className="mt-0.5 truncate text-[11px] text-muted">
+              <p
+                id={descriptionId}
+                className="mt-0.5 truncate text-[11px] text-muted"
+              >
                 {description}
               </p>
             )}
@@ -357,7 +386,12 @@ export function DialogWindow({
           </div>
         </div>
 
-        <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", bodyClassName)}>
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col overflow-hidden",
+            bodyClassName,
+          )}
+        >
           {children}
         </div>
 
@@ -405,8 +439,8 @@ function ResizeHandles({
         />
       ))}
       <div className="pointer-events-none absolute bottom-1.5 right-1.5 flex h-3 w-3 flex-col items-end justify-end gap-[2px] opacity-50">
-        <span className="h-px w-2.5 bg-zinc-500" />
-        <span className="h-px w-1.5 bg-zinc-500" />
+        <span className="h-px w-2.5 bg-muted" />
+        <span className="h-px w-1.5 bg-muted" />
       </div>
     </>
   );

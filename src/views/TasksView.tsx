@@ -33,10 +33,7 @@ import {
   writeWorkspacePrefs,
   type SortKey,
 } from "../lib/preferences";
-import {
-  selectVisibleTasks,
-  sortTasks,
-} from "../state/selectors";
+import { selectVisibleTasks, sortTasks } from "../state/selectors";
 import {
   useRefreshTasks,
   useStoreDispatch,
@@ -58,7 +55,10 @@ const SORT_OPTIONS: readonly { value: SortKey; label: string }[] = [
   { value: "status", label: "Status" },
 ];
 
-function describeEmpty(viewId: ViewId, query: string): {
+function describeEmpty(
+  viewId: ViewId,
+  query: string,
+): {
   readonly icon: ReactNode;
   readonly title: string;
   readonly message: string;
@@ -132,7 +132,9 @@ export function TasksView() {
   const refresh = useRefreshTasks();
   const { openAdd } = useAddDownload();
   const [sort, setSort] = useState<SortKey>(() => readWorkspacePrefs().sort);
-  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
+  const [selected, setSelected] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
   const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
@@ -150,7 +152,9 @@ export function TasksView() {
   );
   const selectedCount = selectedTasks.length;
 
-  const pausable = selectedTasks.filter((task) => task.status === "downloading");
+  const pausable = selectedTasks.filter(
+    (task) => task.status === "downloading",
+  );
   const resumable = selectedTasks.filter((task) => task.status === "paused");
   const retryable = selectedTasks.filter((task) => task.status === "error");
 
@@ -216,7 +220,8 @@ export function TasksView() {
       if (url === null) {
         dispatch({
           type: "notice/set",
-          message: "The clipboard does not contain an HTTP or HTTPS download link.",
+          message:
+            "The clipboard does not contain an HTTP or HTTPS download link.",
         });
         return;
       }
@@ -230,7 +235,7 @@ export function TasksView() {
     return (
       <div className="flex h-full flex-col">
         <div className="flex h-11 shrink-0 items-center border-b border-line/70 px-4">
-          <div className="h-3 w-28 animate-pulse rounded bg-zinc-800" />
+          <div className="h-3 w-28 animate-pulse rounded bg-elevated" />
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {[0, 1, 2, 3, 4, 5].map((row) => (
@@ -238,15 +243,15 @@ export function TasksView() {
               key={row}
               className="flex h-[4.1rem] items-center gap-3 border-b border-line/55 px-4"
             >
-              <div className="h-3.5 w-3.5 animate-pulse rounded bg-zinc-800" />
-              <div className="h-8 w-8 animate-pulse rounded-lg bg-zinc-800" />
+              <div className="h-3.5 w-3.5 animate-pulse rounded bg-elevated" />
+              <div className="h-8 w-8 animate-pulse rounded-lg bg-elevated" />
               <div className="flex-1 space-y-1.5">
-                <div className="h-3 w-2/5 animate-pulse rounded bg-zinc-800" />
-                <div className="h-2 w-3/5 animate-pulse rounded bg-zinc-800/70" />
+                <div className="h-3 w-2/5 animate-pulse rounded bg-elevated" />
+                <div className="h-2 w-3/5 animate-pulse rounded bg-elevated/70" />
               </div>
-              <div className="hidden h-3 w-16 animate-pulse rounded bg-zinc-800 min-[1040px]:block" />
-              <div className="h-1.5 w-32 animate-pulse rounded bg-zinc-800" />
-              <div className="h-6 w-20 animate-pulse rounded-full bg-zinc-800" />
+              <div className="hidden h-3 w-16 animate-pulse rounded bg-elevated min-[1040px]:block" />
+              <div className="h-1.5 w-32 animate-pulse rounded bg-elevated" />
+              <div className="h-6 w-20 animate-pulse rounded-full bg-elevated" />
             </div>
           ))}
         </div>
@@ -279,26 +284,26 @@ export function TasksView() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 flex-wrap items-center gap-2 border-b border-line/70 px-4">
-        <p className="text-[11px] text-zinc-500">
-          <span className="tabular-nums text-zinc-300">{ordered.length}</span>{" "}
+        <p className="text-[11px] text-muted">
+          <span className="tabular-nums text-ink-soft">{ordered.length}</span>{" "}
           {ordered.length === 1 ? "download" : "downloads"}
           {query.trim() !== "" ? " found" : " in view"}
         </p>
         {query.trim() !== "" && (
-          <span className="inline-flex max-w-[18rem] items-center gap-1 rounded-full border border-line bg-panel px-2 py-0.5 text-[10.5px] text-zinc-400">
+          <span className="inline-flex max-w-[18rem] items-center gap-1 rounded-full border border-line bg-panel px-2 py-0.5 text-[10.5px] text-muted">
             <span className="truncate">“{query.trim()}”</span>
             <button
               type="button"
               onClick={() => dispatch({ type: "search/set", query: "" })}
               aria-label="Clear search"
-              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-white/[0.07] hover:text-zinc-200"
+              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted hover:bg-ink/[0.07] hover:text-ink"
             >
               <X size={10} strokeWidth={2} />
             </button>
           </span>
         )}
         {queuePaused && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/[0.06] px-2 py-0.5 text-[10px] text-amber-300">
+          <span className="inline-flex items-center gap-1 rounded-full border border-ink/20 bg-ink/[0.06] px-2 py-0.5 text-[10px] text-ink">
             <Pause size={9} strokeWidth={2.2} /> Queue paused
           </span>
         )}
@@ -307,13 +312,13 @@ export function TasksView() {
             <ArrowUpDown
               size={12}
               strokeWidth={1.8}
-              className="pointer-events-none absolute left-2.5 text-zinc-500"
+              className="pointer-events-none absolute left-2.5 text-muted"
             />
             <span className="sr-only">Sort downloads</span>
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value as SortKey)}
-              className="h-7 appearance-none rounded-md border border-line bg-canvas/55 pl-7 pr-7 text-[11px] text-zinc-300 outline-none transition-colors focus:border-emerald-500/55 focus:ring-1 focus:ring-emerald-500/20"
+              className="h-7 appearance-none rounded-md border border-line bg-canvas/55 pl-7 pr-7 text-[11px] text-ink-soft outline-none transition-colors focus:border-ink/55 focus:ring-1 focus:ring-ink/20"
             >
               {SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -324,7 +329,7 @@ export function TasksView() {
             <ChevronDown
               size={12}
               strokeWidth={1.8}
-              className="pointer-events-none absolute right-2 text-zinc-500"
+              className="pointer-events-none absolute right-2 text-muted"
             />
           </label>
           <IconButton label="Refresh downloads" onClick={refresh}>
@@ -336,15 +341,19 @@ export function TasksView() {
       {notice !== null && status !== "failed" && (
         <div
           role="alert"
-          className="flex shrink-0 items-start gap-2 border-b border-red-900/50 bg-red-950/25 px-4 py-2 text-[11px] leading-relaxed text-red-200"
+          className="flex shrink-0 items-start gap-2 border-b border-ink/50 bg-ink/25 px-4 py-2 text-[11px] leading-relaxed text-ink"
         >
-          <AlertTriangle size={13} className="mt-0.5 shrink-0" strokeWidth={1.8} />
+          <AlertTriangle
+            size={13}
+            className="mt-0.5 shrink-0"
+            strokeWidth={1.8}
+          />
           <p className="min-w-0 flex-1">{notice}</p>
           <button
             type="button"
             onClick={() => dispatch({ type: "notice/clear" })}
             aria-label="Dismiss message"
-            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-red-300/70 hover:bg-red-500/10 hover:text-red-100"
+            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-ink hover:bg-ink/10 hover:text-ink"
           >
             <X size={11} strokeWidth={2} />
           </button>
@@ -352,8 +361,8 @@ export function TasksView() {
       )}
 
       {selectedCount > 0 && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/[0.055] px-4 py-2">
-          <span className="text-[11px] font-medium text-emerald-200">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-ink/20 bg-ink/[0.055] px-4 py-2">
+          <span className="text-[11px] font-medium text-ink">
             {selectedCount} selected
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -412,8 +421,15 @@ export function TasksView() {
           <EmptyState
             icon={<AlertTriangle size={24} strokeWidth={1.6} />}
             title="The queue could not be loaded"
-            message={notice ?? "The download service did not answer. Check that the desktop host is running, then try again."}
-            primaryAction={{ label: "Try again", onClick: refresh, icon: <RefreshCw size={13} /> }}
+            message={
+              notice ??
+              "The download service did not answer. Check that the desktop host is running, then try again."
+            }
+            primaryAction={{
+              label: "Try again",
+              onClick: refresh,
+              icon: <RefreshCw size={13} />,
+            }}
           />
         </div>
       ) : ordered.length === 0 ? (

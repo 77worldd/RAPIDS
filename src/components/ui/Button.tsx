@@ -12,12 +12,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-emerald-500 text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:bg-emerald-400 active:bg-emerald-500",
+    "bg-ink text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:bg-ink-soft active:bg-ink-soft",
   secondary:
-    "border border-line bg-elevated/70 text-zinc-200 hover:border-zinc-600 hover:bg-elevated hover:text-zinc-50",
-  ghost: "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100",
+    "border border-line bg-elevated/70 text-ink hover:border-line-strong hover:bg-elevated hover:text-ink",
+  ghost: "text-muted hover:bg-ink/[0.06] hover:text-ink",
   danger:
-    "border border-red-900/70 bg-red-950/30 text-red-200 hover:border-red-800 hover:bg-red-950/60",
+    "border border-ink/70 bg-ink/30 text-ink hover:border-ink/30 hover:bg-ink/60",
 };
 
 const SIZES: Record<ButtonSize, string> = {
@@ -37,7 +37,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:pointer-events-none disabled:opacity-45",
+        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/45 focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:pointer-events-none disabled:opacity-45",
         VARIANTS[variant],
         SIZES[size],
         className,

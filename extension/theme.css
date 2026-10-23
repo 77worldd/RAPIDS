@@ -1,0 +1,42 @@
+/* Shared monochrome palette for every extension surface. Dark by default,
+   light when the OS asks for it. */
+:root {
+  color-scheme: dark;
+  --canvas: #0a0a0b;
+  --panel: #111113;
+  --elevated: #18181b;
+  --line: #27272a;
+  --line-strong: #3f3f46;
+  --ink: #f4f4f5;
+  --ink-soft: #d4d4d8;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #fafafa;
+  --panel: #ffffff;
+  --elevated: #f4f4f5;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --ink: #0a0a0b;
+  --ink-soft: #3f3f46;
+  --muted: #71717a;
+  --faint: #8b8b90;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --canvas: #fafafa;
+    --panel: #ffffff;
+    --elevated: #f4f4f5;
+    --line: #e4e4e7;
+    --line-strong: #d4d4d8;
+    --ink: #0a0a0b;
+    --ink-soft: #3f3f46;
+    --muted: #71717a;
+    --faint: #8b8b90;
+  }
+}

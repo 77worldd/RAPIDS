@@ -13,17 +13,17 @@ export function ViewTitle() {
   return (
     <div className="flex min-w-0 shrink-0 flex-col justify-center">
       <div className="flex min-w-0 items-baseline gap-2">
-        <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-zinc-100">
+        <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-ink">
           {viewLabel(viewId)}
         </h1>
         <span
-          className="text-[11.5px] tabular-nums text-zinc-500"
+          className="text-[11.5px] tabular-nums text-muted"
           aria-label={`${count} downloads`}
         >
           {count}
         </span>
       </div>
-      <p className="mt-0.5 truncate text-[10.5px] text-zinc-500">
+      <p className="mt-0.5 truncate text-[10.5px] text-muted">
         {active > 0 || waiting > 0
           ? `${active} active · ${waiting} waiting`
           : "Queue is idle"}

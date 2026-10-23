@@ -27,18 +27,18 @@ export function SidebarItem({
       aria-current={active ? "page" : undefined}
       {...(collapsed ? { title: item.label } : {})}
       className={cn(
-        "relative flex h-8 w-full items-center gap-2.5 rounded-md pl-2.5 pr-2 text-left outline-none transition-colors duration-150 ease-out focus-visible:ring-1 focus-visible:ring-emerald-500/65",
+        "relative flex h-8 w-full items-center gap-2.5 rounded-md pl-2.5 pr-2 text-left outline-none transition-colors duration-150 ease-out focus-visible:ring-1 focus-visible:ring-ink/65",
         collapsed && "justify-center pl-0 pr-0",
         active
-          ? "bg-emerald-500/[0.09] text-emerald-100"
-          : "text-zinc-400 hover:bg-white/[0.035] hover:text-zinc-200",
+          ? "bg-ink/[0.09] text-ink"
+          : "text-muted hover:bg-ink/[0.035] hover:text-ink",
       )}
     >
       {active && (
         <motion.span
           layoutId="sidebar-active-marker"
           transition={TRANSITION}
-          className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-emerald-400"
+          className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-ink"
         />
       )}
       <Icon
@@ -46,10 +46,12 @@ export function SidebarItem({
         strokeWidth={1.75}
         className={cn(
           "shrink-0 transition-colors",
-          active ? "text-emerald-400" : "text-zinc-500",
+          active ? "text-ink-soft" : "text-muted",
         )}
       />
-      <span className={cn("flex-1 truncate text-[12px]", collapsed && "sr-only")}>
+      <span
+        className={cn("flex-1 truncate text-[12px]", collapsed && "sr-only")}
+      >
         {item.label}
       </span>
       <span className={cn("ml-auto", collapsed && "sr-only")}>

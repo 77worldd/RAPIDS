@@ -23,11 +23,15 @@ import {
 } from "../../lib/ipc";
 import { pickFolder } from "../../lib/native";
 import {
+  applyTheme,
   readCategoryDirs,
   readDeepLinkConfirm,
+  readTheme,
   writeCategoryDirs,
   writeDeepLinkConfirm,
+  writeTheme,
   type CategoryDirs,
+  type ThemeChoice,
 } from "../../lib/preferences";
 import type {
   ScheduleCreateInput,
@@ -41,9 +45,9 @@ import { IconButton } from "../ui/IconButton";
 import { Toggle } from "../ui/Toggle";
 
 const FIELD =
-  "h-9 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[12.5px] text-zinc-100 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-emerald-500/60 focus:bg-canvas focus:ring-2 focus:ring-emerald-500/15";
-const LABEL = "mb-1.5 block text-[12px] font-medium text-zinc-300";
-const HELP = "mt-1.5 text-[11px] leading-relaxed text-zinc-500";
+  "h-9 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[12.5px] text-ink outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-ink/60 focus:bg-canvas focus:ring-2 focus:ring-ink/15";
+const LABEL = "mb-1.5 block text-[12px] font-medium text-ink-soft";
+const HELP = "mt-1.5 text-[11px] leading-relaxed text-muted";
 
 type TabId = "general" | "folders" | "transfers" | "schedules";
 
@@ -154,8 +158,8 @@ function SettingsSkeleton() {
     <div className="space-y-4" aria-label="Loading settings">
       {[0, 1, 2].map((row) => (
         <div key={row} className="space-y-2">
-          <div className="h-3 w-24 animate-pulse rounded bg-zinc-800" />
-          <div className="h-9 w-full animate-pulse rounded-lg bg-zinc-800/70" />
+          <div className="h-3 w-24 animate-pulse rounded bg-elevated" />
+          <div className="h-9 w-full animate-pulse rounded-lg bg-elevated/70" />
         </div>
       ))}
     </div>
@@ -170,6 +174,7 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
     useState<CategoryDirs>(readCategoryDirs);
   const [confirmBrowserLinks, setConfirmBrowserLinks] =
     useState(readDeepLinkConfirm);
+  const [theme, setTheme] = useState<ThemeChoice>(readTheme);
   const [schedules, setSchedules] = useState<readonly ScheduleView[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -473,10 +478,10 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
                   onClick={() => setTab(entry.id)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex h-8 items-center gap-2 rounded-md px-2.5 text-left text-[12px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60",
+                    "flex h-8 items-center gap-2 rounded-md px-2.5 text-left text-[12px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/60",
                     active
-                      ? "bg-emerald-500/10 text-emerald-300"
-                      : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200",
+                      ? "bg-ink/10 text-ink"
+                      : "text-muted hover:bg-ink/[0.04] hover:text-ink",
                   )}
                 >
                   <Icon size={14} strokeWidth={1.8} />
@@ -488,12 +493,8 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
             <div className="mb-4 flex items-center gap-2">
-              <TabIcon
-                size={15}
-                strokeWidth={1.8}
-                className="text-emerald-400"
-              />
-              <h3 className="text-[13px] font-semibold text-zinc-100">
+              <TabIcon size={15} strokeWidth={1.8} className="text-ink-soft" />
+              <h3 className="text-[13px] font-semibold text-ink">
                 {TABS.find((entry) => entry.id === tab)?.label}
               </h3>
             </div>
@@ -501,11 +502,11 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
             {loading ? (
               <SettingsSkeleton />
             ) : draft === null ? (
-              <div className="rounded-lg border border-red-900/60 bg-red-950/20 px-4 py-5">
-                <p className="text-[12px] font-medium text-red-200">
+              <div className="rounded-lg border border-ink/60 bg-ink/20 px-4 py-5">
+                <p className="text-[12px] font-medium text-ink">
                   Settings could not be loaded.
                 </p>
-                <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                <p className="mt-1 text-[11px] leading-relaxed text-muted">
                   {error ?? "The host did not return the current settings."}
                 </p>
                 <Button
@@ -529,6 +530,12 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
                 browsing={browsing}
                 confirmBrowserLinks={confirmBrowserLinks}
                 onConfirmBrowserLinks={setConfirmBrowserLinks}
+                theme={theme}
+                onTheme={(next) => {
+                  setTheme(next);
+                  writeTheme(next);
+                  applyTheme(next);
+                }}
               />
             ) : tab === "folders" ? (
               <FoldersPanel
@@ -568,7 +575,7 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
             {error !== null && (
               <p
                 role="alert"
-                className="mt-4 rounded-lg border border-red-900/70 bg-red-950/35 px-3 py-2.5 text-[11.5px] leading-relaxed text-red-200"
+                className="mt-4 rounded-lg border border-ink/70 bg-ink/35 px-3 py-2.5 text-[11.5px] leading-relaxed text-ink"
               >
                 {error}
               </p>
@@ -577,9 +584,9 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
         </div>
 
         <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-canvas/25 px-4 py-3">
-          <p className="min-w-0 flex-1 text-[11px] text-zinc-500">
+          <p className="min-w-0 flex-1 text-[11px] text-muted">
             {saved !== null ? (
-              <span className="inline-flex items-center gap-1.5 text-emerald-300">
+              <span className="inline-flex items-center gap-1.5 text-ink">
                 <Check size={12} strokeWidth={2} /> {saved}
               </span>
             ) : dirty ? (
@@ -616,6 +623,8 @@ function GeneralPanel({
   browsing,
   confirmBrowserLinks,
   onConfirmBrowserLinks,
+  theme,
+  onTheme,
 }: {
   readonly draft: SettingsDraft;
   readonly onDraft: <K extends keyof SettingsDraft>(
@@ -626,6 +635,8 @@ function GeneralPanel({
   readonly browsing: boolean;
   readonly confirmBrowserLinks: boolean;
   readonly onConfirmBrowserLinks: (checked: boolean) => void;
+  readonly theme: ThemeChoice;
+  readonly onTheme: (theme: ThemeChoice) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -658,13 +669,49 @@ function GeneralPanel({
         </p>
       </section>
 
+      <section>
+        <span className={LABEL}>Appearance</span>
+        <div
+          role="radiogroup"
+          aria-label="Appearance"
+          className="inline-flex rounded-lg border border-line bg-panel/40 p-0.5"
+        >
+          {(
+            [
+              ["system", "System"],
+              ["light", "Light"],
+              ["dark", "Dark"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={theme === value}
+              onClick={() => onTheme(value)}
+              className={
+                theme === value
+                  ? "h-7 rounded-[6px] bg-ink px-3 text-[11.5px] font-medium text-canvas"
+                  : "h-7 rounded-[6px] px-3 text-[11.5px] font-medium text-muted transition-colors hover:text-ink"
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className={HELP}>
+          System follows the operating system. The extension uses the same
+          palette.
+        </p>
+      </section>
+
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-[12px] font-medium text-zinc-200">
+            <p className="text-[12px] font-medium text-ink">
               Resume queue on launch
             </p>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
               Continue unfinished transfers when RAPIDS starts.
             </p>
           </div>
@@ -679,10 +726,10 @@ function GeneralPanel({
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-[12px] font-medium text-zinc-200">
+            <p className="text-[12px] font-medium text-ink">
               Ask before adding links sent from the browser
             </p>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
               Browser handoffs open the Add download sheet for review. Turn this
               off to queue them immediately.
             </p>
@@ -696,7 +743,7 @@ function GeneralPanel({
         {!confirmBrowserLinks && (
           <p
             role="status"
-            className="mt-2.5 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2.5 py-2 text-[11px] leading-relaxed text-amber-200/90"
+            className="mt-2.5 rounded-md border border-ink/25 bg-ink/[0.06] px-2.5 py-2 text-[11px] leading-relaxed text-ink"
           >
             Links opened by web pages or the browser extension will be added
             without showing the confirmation sheet.
@@ -775,7 +822,7 @@ function FoldersPanel({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-[11.5px] leading-relaxed text-zinc-500">
+      <p className="text-[11.5px] leading-relaxed text-muted">
         Category folders are optional. When set, they take precedence over the
         default folder for new downloads in that category.
       </p>
@@ -788,13 +835,13 @@ function FoldersPanel({
               key={category.id}
               className="flex items-center gap-2 px-3 py-2.5"
             >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-zinc-400">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink/[0.04] text-muted">
                 <Icon size={14} strokeWidth={1.8} />
               </span>
               <div className="min-w-0 flex-1">
                 <label
                   htmlFor={`category-dir-${category.id}`}
-                  className="block text-[11.5px] font-medium text-zinc-300"
+                  className="block text-[11.5px] font-medium text-ink-soft"
                 >
                   {category.label}
                 </label>
@@ -806,7 +853,7 @@ function FoldersPanel({
                   onChange={(event) =>
                     onChange(category.id, event.target.value)
                   }
-                  className="mt-1 h-7 w-full rounded-md border border-line bg-canvas/50 px-2 text-[11px] text-zinc-200 outline-none transition-colors focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20"
+                  className="mt-1 h-7 w-full rounded-md border border-line bg-canvas/50 px-2 text-[11px] text-ink outline-none transition-colors focus:border-ink/60 focus:ring-1 focus:ring-ink/20"
                 />
               </div>
               <Button
@@ -852,7 +899,7 @@ function TransfersPanel({
             onChange={(event) => onDraft("globalSpeedKbps", event.target.value)}
             className={`${FIELD} pr-16`}
           />
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500">
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted">
             KiB/s
           </span>
         </div>
@@ -863,18 +910,18 @@ function TransfersPanel({
       </section>
 
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
-        <p className="text-[12px] font-medium text-zinc-200">
+        <p className="text-[12px] font-medium text-ink">
           What the queue controls
         </p>
-        <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
           Pausing the queue stops new transfers from starting. Transfers already
           in progress keep running until they finish, pause, or are cancelled.
         </p>
       </section>
 
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
-        <p className="text-[12px] font-medium text-zinc-200">Retry schedule</p>
-        <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-500">
+        <p className="text-[12px] font-medium text-ink">Retry schedule</p>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
           RAPIDS waits five seconds after the first failure, then doubles the
           delay up to five minutes. The retry count is set in General.
         </p>
@@ -929,16 +976,14 @@ function SchedulesPanel({
       <section>
         <div className="mb-2 flex items-center justify-between gap-3">
           <div>
-            <p className="text-[12px] font-medium text-zinc-200">
-              Start windows
-            </p>
-            <p className="mt-0.5 text-[11px] text-zinc-500">
+            <p className="text-[12px] font-medium text-ink">Start windows</p>
+            <p className="mt-0.5 text-[11px] text-muted">
               Assign a window to a download from its Transfer options.
             </p>
           </div>
         </div>
         {schedules.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[11.5px] text-zinc-500">
+          <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[11.5px] text-muted">
             No start windows yet. Add one below to hold new downloads until a
             chosen time.
           </p>
@@ -949,14 +994,14 @@ function SchedulesPanel({
                 key={schedule.id}
                 className="flex items-center gap-3 px-3 py-2.5"
               >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-300">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink/10 text-ink">
                   <CalendarClock size={14} strokeWidth={1.8} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12px] font-medium text-zinc-200">
+                  <p className="truncate text-[12px] font-medium text-ink">
                     {schedule.label}
                   </p>
-                  <p className="mt-0.5 truncate text-[10.5px] text-zinc-500">
+                  <p className="mt-0.5 truncate text-[10.5px] text-muted">
                     {scheduleKindLabel(schedule.kind)}
                     {schedule.kind === "weekly"
                       ? ` (${weekdayNames(schedule.weekdays)})`
@@ -975,7 +1020,7 @@ function SchedulesPanel({
                   label={`Delete ${schedule.label}`}
                   onClick={() => onDelete(schedule)}
                   disabled={busy === schedule.id}
-                  className="h-7 w-7 text-zinc-500 hover:text-red-300"
+                  className="h-7 w-7 text-muted hover:text-ink"
                 >
                   {busy === schedule.id ? (
                     <Loader2 size={13} className="animate-spin" />
@@ -990,7 +1035,7 @@ function SchedulesPanel({
       </section>
 
       <section className="rounded-lg border border-line bg-panel/30 p-3.5">
-        <p className="mb-3 flex items-center gap-1.5 text-[12px] font-medium text-zinc-200">
+        <p className="mb-3 flex items-center gap-1.5 text-[12px] font-medium text-ink">
           <Plus size={13} strokeWidth={2} /> Add a start window
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1041,10 +1086,10 @@ function SchedulesPanel({
                       aria-pressed={selected}
                       onClick={() => onWeekdays(newWeekdays ^ day.bit)}
                       className={cn(
-                        "h-8 min-w-11 rounded-md border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                        "h-8 min-w-11 rounded-md border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/50",
                         selected
-                          ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
-                          : "border-line bg-canvas/45 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200",
+                          ? "border-ink/50 bg-ink/10 text-ink"
+                          : "border-line bg-canvas/45 text-muted hover:border-line-strong hover:text-ink",
                       )}
                     >
                       {day.label}
@@ -1085,7 +1130,7 @@ function SchedulesPanel({
                 onChange={(event) => onWindow(event.target.value)}
                 className={`${FIELD} pr-16`}
               />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500">
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted">
                 minutes
               </span>
             </div>
@@ -1095,8 +1140,8 @@ function SchedulesPanel({
           </div>
           <div className="flex items-end justify-between gap-3 pb-1">
             <div>
-              <p className="text-[12px] font-medium text-zinc-300">Enabled</p>
-              <p className="mt-0.5 text-[11px] text-zinc-500">
+              <p className="text-[12px] font-medium text-ink-soft">Enabled</p>
+              <p className="mt-0.5 text-[11px] text-muted">
                 Ready for new downloads.
               </p>
             </div>
@@ -1121,10 +1166,7 @@ function SchedulesPanel({
           </Button>
         </div>
         {error !== null && (
-          <p
-            role="alert"
-            className="mt-2 text-[11px] leading-relaxed text-red-300"
-          >
+          <p role="alert" className="mt-2 text-[11px] leading-relaxed text-ink">
             {error}
           </p>
         )}

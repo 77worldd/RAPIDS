@@ -58,9 +58,9 @@ import { Button } from "../ui/Button";
 import { DialogWindow } from "../ui/DialogWindow";
 
 const FIELD =
-  "h-10 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[13px] text-zinc-100 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-emerald-500/60 focus:bg-canvas focus:ring-2 focus:ring-emerald-500/15";
-const LABEL = "mb-1.5 block text-[12px] font-medium text-zinc-300";
-const HELP = "mt-1.5 text-[11px] leading-relaxed text-zinc-500";
+  "h-10 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[13px] text-ink outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-ink/60 focus:bg-canvas focus:ring-2 focus:ring-ink/15";
+const LABEL = "mb-1.5 block text-[12px] font-medium text-ink-soft";
+const HELP = "mt-1.5 text-[11px] leading-relaxed text-muted";
 
 function initialDraft(url: string | undefined): AddDraft {
   const info = inspectUrl(url ?? "");
@@ -81,16 +81,16 @@ function kindLabel(info: UrlFileInfo): string {
 }
 
 function kindTone(info: UrlFileInfo): string {
-  if (!info.valid) return "bg-zinc-800 text-zinc-400";
+  if (!info.valid) return "bg-elevated text-muted";
   if (
     info.isStreaming ||
     info.isPageLike ||
     info.fileName === null ||
     info.extension === null
   ) {
-    return "bg-amber-500/10 text-amber-300";
+    return "bg-ink/10 text-ink";
   }
-  return "bg-emerald-500/10 text-emerald-300";
+  return "bg-ink/10 text-ink";
 }
 
 function taskStatusLabel(status: string): string {
@@ -118,24 +118,24 @@ function BrowserHandoffBanner({
     .join(" · ");
 
   return (
-    <section className="rounded-xl border border-sky-500/25 bg-sky-500/[0.055] px-3.5 py-3">
+    <section className="rounded-xl border border-ink/25 bg-ink/[0.055] px-3.5 py-3">
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-sky-400/25 bg-sky-500/10 text-sky-300">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-ink/25 bg-ink/10 text-ink">
           <Globe2 size={16} strokeWidth={1.8} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200">
+            <span className="inline-flex items-center gap-1 rounded-full bg-ink/15 px-2 py-0.5 text-[10px] font-semibold text-ink">
               <Globe2 size={10} strokeWidth={2} />
               Sent from browser
             </span>
-            <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-zinc-400">
+            <span className="rounded-full bg-ink/[0.05] px-2 py-0.5 text-[10px] font-medium text-muted">
               {handoffKindLabel(handoff.kind)}
             </span>
           </div>
           {hint !== "" && (
             <p
-              className="mt-1.5 truncate text-[12px] text-zinc-300"
+              className="mt-1.5 truncate text-[12px] text-ink-soft"
               title={hint}
             >
               Browser suggests: {hint}
@@ -143,13 +143,13 @@ function BrowserHandoffBanner({
           )}
           {handoff.sourcePage !== null && (
             <p
-              className="mt-0.5 truncate text-[11px] text-zinc-500"
+              className="mt-0.5 truncate text-[11px] text-muted"
               title={handoff.sourcePage}
             >
               From {handoff.sourcePage}
             </p>
           )}
-          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          <p className="mt-2 text-[11px] leading-relaxed text-muted">
             Review the destination and transfer options, then add the download.
             RAPIDS confirms the file name when the transfer starts.
           </p>
@@ -433,7 +433,7 @@ export function AddDownloadDialog({
         aria-busy={submitting}
         className={cn(
           "flex min-h-0 flex-1 flex-col",
-          dragging && "ring-2 ring-inset ring-emerald-400/70",
+          dragging && "ring-2 ring-inset ring-ink/70",
         )}
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -446,7 +446,7 @@ export function AddDownloadDialog({
                 <label htmlFor="download-url" className={LABEL}>
                   Download link
                 </label>
-                <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted">
                   <Link2 size={12} strokeWidth={1.8} />
                   HTTP or HTTPS
                 </span>
@@ -455,7 +455,7 @@ export function AddDownloadDialog({
                 <Link2
                   size={15}
                   strokeWidth={1.8}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
                 />
                 <input
                   id="download-url"
@@ -473,7 +473,7 @@ export function AddDownloadDialog({
                 {draft.url.length === 0 && (
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-9 right-20 top-1/2 -translate-y-1/2 truncate text-[12px] text-zinc-600"
+                    className="pointer-events-none absolute left-9 right-20 top-1/2 -translate-y-1/2 truncate text-[12px] text-faint"
                   >
                     Paste a direct file link
                   </span>
@@ -482,7 +482,7 @@ export function AddDownloadDialog({
                   type="button"
                   onClick={() => void paste()}
                   disabled={pasting}
-                  className="absolute right-1 top-1 inline-flex h-8 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/70 disabled:opacity-50"
+                  className="absolute right-1 top-1 inline-flex h-8 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/70 disabled:opacity-50"
                 >
                   <ClipboardPaste size={13} strokeWidth={1.8} />
                   {pasting ? "Reading" : "Paste"}
@@ -504,22 +504,22 @@ export function AddDownloadDialog({
               )}
             >
               {draft.url.trim() === "" ? (
-                <div className="flex items-center gap-3 text-[12px] text-zinc-500">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-panel text-zinc-500">
+                <div className="flex items-center gap-3 text-[12px] text-muted">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-panel text-muted">
                     <Sparkles size={15} strokeWidth={1.7} />
                   </div>
                   <div>
-                    <p className="font-medium text-zinc-400">
+                    <p className="font-medium text-muted">
                       File details appear here
                     </p>
-                    <p className="mt-0.5 text-[11px] text-zinc-500">
+                    <p className="mt-0.5 text-[11px] text-muted">
                       Name, type, and destination are read from the link before
                       it is queued.
                     </p>
                   </div>
                 </div>
               ) : !info.valid ? (
-                <div className="flex items-start gap-3 text-[12px] text-amber-200">
+                <div className="flex items-start gap-3 text-[12px] text-ink">
                   <AlertTriangle
                     size={15}
                     className="mt-0.5 shrink-0"
@@ -530,12 +530,12 @@ export function AddDownloadDialog({
               ) : (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-panel text-emerald-300">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-panel text-ink">
                       <CategoryIcon size={18} strokeWidth={1.7} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-[13px] font-medium text-zinc-100">
+                        <p className="truncate text-[13px] font-medium text-ink">
                           {info.fileName ?? "No file name in link"}
                         </p>
                         <span
@@ -555,7 +555,7 @@ export function AddDownloadDialog({
                           {kindLabel(info)}
                         </span>
                       </div>
-                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
                         <span>{info.typeLabel}</span>
                         <span className="truncate" title={info.host}>
                           {info.host}
@@ -566,11 +566,11 @@ export function AddDownloadDialog({
                   </div>
                   <div className="grid gap-2 rounded-lg border border-line/70 bg-panel/40 px-3 py-2.5 sm:grid-cols-2">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
                         Destination
                       </p>
                       <p
-                        className="mt-0.5 truncate text-[11px] text-zinc-300"
+                        className="mt-0.5 truncate text-[11px] text-ink-soft"
                         title={
                           effectiveDest || "Using the system Downloads folder"
                         }
@@ -579,10 +579,10 @@ export function AddDownloadDialog({
                       </p>
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
                         Source
                       </p>
-                      <p className="mt-0.5 truncate text-[11px] text-zinc-300">
+                      <p className="mt-0.5 truncate text-[11px] text-ink-soft">
                         {destinationSource}
                       </p>
                     </div>
@@ -590,7 +590,7 @@ export function AddDownloadDialog({
                   {(info.isStreaming ||
                     info.isPageLike ||
                     info.extension === null) && (
-                    <p className="rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
+                    <p className="rounded-lg border border-ink/20 bg-ink/[0.06] px-3 py-2 text-[11px] leading-relaxed text-ink">
                       {info.isStreaming
                         ? "This link points to a playlist, not one file. RAPIDS cannot merge streaming segments from a direct link; use Inspect a media page to review media the site exposes."
                         : info.isPageLike
@@ -599,7 +599,7 @@ export function AddDownloadDialog({
                     </p>
                   )}
                   {duplicate !== null && (
-                    <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3.5 py-3 text-[12px] text-amber-100">
+                    <div className="rounded-lg border border-ink/25 bg-ink/[0.06] px-3.5 py-3 text-[12px] text-ink">
                       <div className="flex items-start gap-2">
                         <AlertTriangle
                           size={14}
@@ -609,13 +609,13 @@ export function AddDownloadDialog({
                         <div className="min-w-0">
                           <p className="font-medium">Already in your library</p>
                           <p
-                            className="mt-0.5 truncate text-[11px] text-amber-200/80"
+                            className="mt-0.5 truncate text-[11px] text-ink"
                             title={duplicate.destPath}
                           >
                             {duplicate.fileName} -{" "}
                             {taskStatusLabel(duplicate.status)}
                           </p>
-                          <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-amber-200/90">
+                          <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-ink">
                             <input
                               type="checkbox"
                               checked={allowDuplicate}
@@ -623,7 +623,7 @@ export function AddDownloadDialog({
                                 setAllowDuplicate(event.target.checked);
                                 setError(null);
                               }}
-                              className="h-3.5 w-3.5 rounded border-amber-500/40 bg-transparent accent-amber-400"
+                              className="h-3.5 w-3.5 rounded border-ink/40 bg-transparent accent-ink"
                             />
                             Add another copy
                           </label>
@@ -646,7 +646,7 @@ export function AddDownloadDialog({
                   <FolderOpen
                     size={15}
                     strokeWidth={1.8}
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
                   />
                   <input
                     id="download-destination"
@@ -679,7 +679,7 @@ export function AddDownloadDialog({
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
                   <p className={LABEL}>Category</p>
-                  <p className="-mt-1 text-[11px] text-zinc-500">
+                  <p className="-mt-1 text-[11px] text-muted">
                     Chosen automatically from the file type. Change it if
                     needed.
                   </p>
@@ -694,13 +694,13 @@ export function AddDownloadDialog({
                         category: suggestedCategory(info),
                       }));
                     }}
-                    className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-emerald-400/80 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
+                    className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-ink-soft transition-colors hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/60"
                   >
                     <Sparkles size={12} strokeWidth={1.8} />
                     Use auto
                   </button>
                 ) : (
-                  <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-emerald-400/80">
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ink-soft">
                     <Sparkles size={12} strokeWidth={1.8} />
                     Auto
                   </span>
@@ -722,18 +722,18 @@ export function AddDownloadDialog({
                       aria-checked={selected}
                       onClick={() => chooseCategory(entry.id)}
                       className={cn(
-                        "group flex min-h-[3.5rem] items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/45",
+                        "group flex min-h-[3.5rem] items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/45",
                         selected
-                          ? "border-emerald-500/50 bg-emerald-500/[0.08] text-zinc-100"
-                          : "border-line bg-panel/40 text-zinc-400 hover:border-zinc-600 hover:bg-white/[0.03] hover:text-zinc-200",
+                          ? "border-ink/50 bg-ink/[0.08] text-ink"
+                          : "border-line bg-panel/40 text-muted hover:border-line-strong hover:bg-ink/[0.03] hover:text-ink",
                       )}
                     >
                       <span
                         className={cn(
                           "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
                           selected
-                            ? "bg-emerald-500/15 text-emerald-300"
-                            : "bg-white/[0.04] text-zinc-500 group-hover:text-zinc-300",
+                            ? "bg-ink/15 text-ink"
+                            : "bg-ink/[0.04] text-muted group-hover:text-ink-soft",
                         )}
                       >
                         <Icon size={14} strokeWidth={1.8} />
@@ -742,7 +742,7 @@ export function AddDownloadDialog({
                         <span className="block truncate text-[12px] font-medium">
                           {entry.label}
                         </span>
-                        <span className="mt-0.5 block truncate text-[10px] text-zinc-500">
+                        <span className="mt-0.5 block truncate text-[10px] text-muted">
                           {entry.description}
                         </span>
                       </span>
@@ -757,24 +757,24 @@ export function AddDownloadDialog({
                 type="button"
                 aria-expanded={advancedOpen}
                 onClick={() => setAdvancedOpen((open) => !open)}
-                className="flex w-full items-center gap-2 bg-panel/30 px-3.5 py-3 text-left transition-colors hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40"
+                className="flex w-full items-center gap-2 bg-panel/30 px-3.5 py-3 text-left transition-colors hover:bg-ink/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink/40"
               >
                 <ShieldCheck
                   size={14}
                   strokeWidth={1.8}
-                  className="text-zinc-500"
+                  className="text-muted"
                 />
-                <span className="flex-1 text-[12px] font-medium text-zinc-300">
+                <span className="flex-1 text-[12px] font-medium text-ink-soft">
                   Transfer options
                 </span>
-                <span className="text-[10px] text-zinc-500">
+                <span className="text-[10px] text-muted">
                   Connections, speed, schedule, checksum
                 </span>
                 <ChevronDown
                   size={14}
                   strokeWidth={1.8}
                   className={cn(
-                    "text-zinc-500 transition-transform duration-150",
+                    "text-muted transition-transform duration-150",
                     advancedOpen && "rotate-180",
                   )}
                 />
@@ -834,7 +834,7 @@ export function AddDownloadDialog({
                         }
                         className={`${FIELD} pr-14`}
                       />
-                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500">
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted">
                         B/s
                       </span>
                     </div>
@@ -887,7 +887,7 @@ export function AddDownloadDialog({
                       checksum.
                     </p>
                   </div>
-                  <p className="rounded-lg border border-line/70 bg-canvas/40 px-3 py-2 text-[11px] leading-relaxed text-zinc-500 sm:col-span-2">
+                  <p className="rounded-lg border border-line/70 bg-canvas/40 px-3 py-2 text-[11px] leading-relaxed text-muted sm:col-span-2">
                     Per-download sign-in, browser cookies, and streaming
                     extraction are not available for direct transfers. Use
                     Inspect a media page for media the browser can expose.
@@ -902,22 +902,22 @@ export function AddDownloadDialog({
           {error !== null && (
             <p
               role="alert"
-              className="mb-2 rounded-lg border border-red-900/70 bg-red-950/35 px-3 py-2 text-[11.5px] leading-relaxed text-red-200"
+              className="mb-2 rounded-lg border border-ink/70 bg-ink/35 px-3 py-2 text-[11.5px] leading-relaxed text-ink"
             >
               {error}
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <p className="min-w-0 flex-1 text-[11px] text-zinc-500">
-              <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px] text-zinc-400">
+            <p className="min-w-0 flex-1 text-[11px] text-muted">
+              <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px] text-muted">
                 Ctrl
               </kbd>{" "}
               +{" "}
-              <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px] text-zinc-400">
+              <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px] text-muted">
                 Enter
               </kbd>{" "}
               to add -{" "}
-              <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px] text-zinc-400">
+              <kbd className="rounded border border-line bg-panel px-1.5 py-0.5 font-sans text-[10px] text-muted">
                 Esc
               </kbd>{" "}
               to close

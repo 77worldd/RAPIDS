@@ -27,8 +27,10 @@
 
   function setStatus(element, message) {
     element.textContent = message;
-    element.style.color =
-      message.toLowerCase().indexOf("could not") === 0 ? "#fca5a5" : "";
+    element.classList.toggle(
+      "status-error",
+      message.toLowerCase().indexOf("could not") === 0,
+    );
   }
 
   function storageGet(key) {

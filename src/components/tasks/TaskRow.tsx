@@ -13,13 +13,13 @@ import { StatusPill } from "./StatusPill";
 import { TaskActionMenu } from "./TaskActionMenu";
 
 const CATEGORY_TONE: Record<TagId, string> = {
-  movies: "bg-violet-500/10 text-violet-300",
-  music: "bg-sky-500/10 text-sky-300",
-  images: "bg-rose-500/10 text-rose-300",
-  documents: "bg-amber-500/10 text-amber-300",
-  archives: "bg-orange-500/10 text-orange-300",
-  apps: "bg-emerald-500/10 text-emerald-300",
-  other: "bg-zinc-500/10 text-zinc-300",
+  movies: "bg-ink/10 text-ink",
+  music: "bg-ink/[0.075] text-ink-soft",
+  images: "bg-ink/[0.06] text-ink-soft",
+  documents: "bg-ink/[0.05] text-muted",
+  archives: "bg-ink/[0.085] text-ink-soft",
+  apps: "bg-ink/[0.1] text-ink",
+  other: "bg-ink/[0.04] text-muted",
 };
 
 function extensionOf(fileName: string): string {
@@ -96,10 +96,10 @@ function RowAction({
       aria-label={`${label} ${task.fileName}`}
       title={label}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/65",
+        "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/65",
         task.status === "completed"
-          ? "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-300"
-          : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100",
+          ? "text-muted hover:bg-ink/10 hover:text-ink"
+          : "text-muted hover:bg-ink/[0.06] hover:text-ink",
       )}
     >
       {icon}
@@ -123,7 +123,9 @@ export function TaskRow({
   const extension = extensionOf(task.fileName);
   const fraction = progressFraction(task);
   const percent =
-    fraction === null ? null : Math.min(100, Math.max(0, Math.round(fraction * 100)));
+    fraction === null
+      ? null
+      : Math.min(100, Math.max(0, Math.round(fraction * 100)));
   const unknownSize = task.totalBytes === null;
   const unknownProgress = fraction === null && task.status === "downloading";
   const size = unknownSize
@@ -151,10 +153,10 @@ export function TaskRow({
       className={cn(
         "group flex cursor-default items-center gap-2 border-b border-line/55 px-3 py-2.5 transition-colors duration-150 min-[1180px]:gap-3 min-[1180px]:px-4",
         selected
-          ? "bg-emerald-500/[0.045]"
+          ? "bg-ink/[0.045]"
           : task.status === "error"
-            ? "bg-red-500/[0.022] hover:bg-red-500/[0.04]"
-            : "hover:bg-white/[0.025]",
+            ? "bg-ink/[0.022] hover:bg-ink/[0.04]"
+            : "hover:bg-ink/[0.025]",
       )}
     >
       <div className="flex w-5 shrink-0 items-center justify-center">
@@ -164,7 +166,7 @@ export function TaskRow({
           onChange={() => onToggle(task.id)}
           onClick={(event) => event.stopPropagation()}
           aria-label={`Select ${task.fileName}`}
-          className="h-3.5 w-3.5 cursor-pointer rounded border-zinc-600 bg-transparent accent-emerald-500"
+          className="h-3.5 w-3.5 cursor-pointer rounded border-line-strong bg-transparent accent-ink-soft"
         />
       </div>
 
@@ -179,25 +181,25 @@ export function TaskRow({
         </span>
         <div className="min-w-0 flex-1">
           <p
-            className="truncate text-[12px] font-medium text-zinc-200 group-hover:text-zinc-100"
+            className="truncate text-[12px] font-medium text-ink group-hover:text-ink"
             title={task.fileName}
           >
             {task.fileName}
           </p>
-          <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-zinc-500">
-            <span className="shrink-0 font-medium tracking-wide text-zinc-500">
+          <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted">
+            <span className="shrink-0 font-medium tracking-wide text-muted">
               {extension}
             </span>
-            <span className="text-zinc-700">·</span>
+            <span className="text-ink-soft">·</span>
             <span className="shrink-0">{category.label}</span>
-            <span className="text-zinc-700">·</span>
+            <span className="text-ink-soft">·</span>
             <span className="truncate" title={task.destPath}>
               {task.destPath}
             </span>
           </p>
           {task.status === "error" && task.errorMessage !== null && (
             <p
-              className="mt-0.5 truncate text-[10px] text-red-300/90"
+              className="mt-0.5 truncate text-[10px] text-ink"
               title={task.errorMessage}
             >
               {task.errorMessage}
@@ -207,10 +209,13 @@ export function TaskRow({
       </div>
 
       <div className="w-16 shrink-0 text-right min-[1180px]:w-[4.5rem]">
-        <p className="truncate text-[11px] tabular-nums text-zinc-300" title={size}>
+        <p
+          className="truncate text-[11px] tabular-nums text-ink-soft"
+          title={size}
+        >
           {size}
         </p>
-        <p className="mt-0.5 text-[9.5px] text-zinc-600">
+        <p className="mt-0.5 text-[9.5px] text-faint">
           {!unknownSize
             ? "total"
             : task.downloaded > 0
@@ -225,38 +230,40 @@ export function TaskRow({
 
       <div className="w-[7rem] shrink-0 min-[1180px]:w-40">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="truncate text-[10px] text-zinc-400">
+          <span className="truncate text-[10px] text-muted">
             {statusWord(task)}
           </span>
-          <span className="shrink-0 text-[9.5px] tabular-nums text-zinc-600">
+          <span className="shrink-0 text-[9.5px] tabular-nums text-faint">
             {percent === null ? "" : `${percent}%`}
           </span>
         </div>
-        <div className="relative h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+        <div className="relative h-1.5 overflow-hidden rounded-full bg-ink/[0.06]">
           <div
             className={cn(
               "h-full rounded-full transition-[width] duration-300 ease-out",
               unknownProgress && "rapids-progress-unknown w-1/3",
               task.status === "error"
-                ? "bg-red-400/80"
+                ? "bg-ink/20"
                 : task.status === "paused"
-                  ? "bg-amber-400/80"
+                  ? "bg-ink/40"
                   : task.status === "completed"
-                    ? "bg-teal-400"
+                    ? "bg-ink"
                     : task.status === "queued" || task.status === "scheduled"
-                      ? "bg-sky-400/70"
-                      : "bg-emerald-400",
+                      ? "bg-ink/25"
+                      : "bg-ink",
             )}
-            style={unknownProgress ? undefined : { width: progressWidth(fraction) }}
+            style={
+              unknownProgress ? undefined : { width: progressWidth(fraction) }
+            }
           />
         </div>
-        <p className="mt-1 truncate text-[9.5px] tabular-nums text-zinc-600">
+        <p className="mt-1 truncate text-[9.5px] tabular-nums text-faint">
           {downloadedLabel}
         </p>
       </div>
 
       <div className="w-[3.75rem] shrink-0 text-right min-[1180px]:w-[4.2rem]">
-        <p className="truncate text-[11px] tabular-nums text-zinc-300">
+        <p className="truncate text-[11px] tabular-nums text-ink-soft">
           {task.status === "downloading" && task.speedBps > 0
             ? formatSpeed(task.speedBps)
             : "—"}
@@ -264,7 +271,7 @@ export function TaskRow({
       </div>
 
       <div className="w-[3.25rem] shrink-0 text-right min-[1180px]:w-14">
-        <p className="truncate text-[11px] tabular-nums text-zinc-300">
+        <p className="truncate text-[11px] tabular-nums text-ink-soft">
           {task.status === "downloading" ? formatEta(task.etaSeconds) : "—"}
         </p>
       </div>

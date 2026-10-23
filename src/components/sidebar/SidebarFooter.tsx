@@ -41,7 +41,11 @@ export function SidebarFooter({
 
   const label = info !== null ? `${info.name} ${info.version}` : "RAPIDS";
   const summary = `${active} active · ${waiting} waiting`;
-  const state = queuePaused ? "Queue paused" : active > 0 ? "Downloading" : "Queue ready";
+  const state = queuePaused
+    ? "Queue paused"
+    : active > 0
+      ? "Downloading"
+      : "Queue ready";
 
   if (collapsed) {
     return (
@@ -52,7 +56,7 @@ export function SidebarFooter({
         <span
           className={cn(
             "h-2 w-2 rounded-full",
-            queuePaused ? "bg-amber-400" : active > 0 ? "bg-emerald-400" : "bg-zinc-600",
+            queuePaused ? "bg-ink" : active > 0 ? "bg-ink" : "bg-faint",
           )}
         />
       </div>
@@ -62,24 +66,24 @@ export function SidebarFooter({
   return (
     <div className="shrink-0 border-t border-line/80 px-3 py-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-zinc-400">
+        <span className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted">
           <span
             className={cn(
               "h-1.5 w-1.5 shrink-0 rounded-full",
               queuePaused
-                ? "bg-amber-400"
+                ? "bg-ink"
                 : active > 0
-                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
-                  : "bg-zinc-600",
+                  ? "bg-ink shadow-[0_0_8px_rgba(0,0,0,0.45)]"
+                  : "bg-faint",
             )}
           />
           <span className="truncate">{state}</span>
         </span>
-        <span className="shrink-0 text-[10.5px] tabular-nums text-zinc-500">
+        <span className="shrink-0 text-[10.5px] tabular-nums text-muted">
           {speed > 0 ? formatSpeed(speed) : "Idle"}
         </span>
       </div>
-      <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-zinc-600">
+      <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-faint">
         <span className="truncate">{summary}</span>
         <span className="shrink-0 tabular-nums">{label}</span>
       </div>
