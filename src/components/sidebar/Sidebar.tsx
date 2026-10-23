@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
-import { ArrowDownToLine } from "lucide-react";
 import { useMemo } from "react";
+import markUrl from "../../assets/rapids-mark.svg";
 import { NAV_SECTIONS } from "../../config/navigation";
 import { cn } from "../../lib/cn";
 import { countForView } from "../../state/selectors";
@@ -58,9 +58,13 @@ export function Sidebar() {
       >
         {!collapsed && (
           <>
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 text-zinc-950 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.9)]">
-              <ArrowDownToLine size={16} strokeWidth={2.2} />
-            </div>
+            <img
+              src={markUrl}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              className="h-8 w-8 shrink-0 select-none"
+            />
             <div className="min-w-0 flex-1">
               <p className="text-[12px] font-semibold tracking-[0.14em] text-zinc-100">
                 RAPIDS
