@@ -67,9 +67,9 @@ rapids://add?u=<encoded-http(s)-url>&n=<name>&t=video|audio|file&p=<page>&sz=<by
 ```
 
 - `u` is required and must be an absolute HTTP or HTTPS URL.
-- `n`, `t`, `p`, `sz`, and `v` are optional hints. Invalid optional values are
-  discarded; an invalid `u`, an unsupported action, or a link longer than 4096
-  characters is rejected with a notice.
+- `n`, `t`, `p`, `sz`, and `v` are optional hints. Hints are validated when
+  present; malformed values, an invalid `u`, an unsupported action, or a link
+  longer than 4096 characters are rejected with a notice.
 - Only the `add` action is accepted. Duplicate submissions of the same URL
   within 30 seconds are ignored.
 - Warm and cold launches both use the validated pending-link inbox. A cold
