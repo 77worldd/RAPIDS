@@ -19,6 +19,7 @@ export interface MediaVariant {
   readonly size: number | null;
   readonly hasAudio: boolean | null;
   readonly codec: string | null;
+  readonly duration: number | null;
   readonly source: MediaSource;
 }
 
@@ -45,6 +46,8 @@ export interface MediaCandidateInput {
   readonly title?: string | null;
   readonly height?: number | null;
   readonly hasAudio?: boolean | null;
+  readonly poster?: string | null;
+  readonly duration?: number | null;
 }
 
 export interface MediaPageInput {
@@ -214,6 +217,8 @@ const GENERIC_TITLES = new Set([
   "audio",
   "media",
   "video player",
+  "media player",
+  "play video",
   "html5 video",
   "untitled",
   "untitled video",
@@ -380,6 +385,18 @@ function explicitHeight(value: unknown): number | null {
   return value;
 }
 
+function explicitDuration(value: unknown): number | null {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    value > 24 * 60 * 60
+  ) {
+    return null;
+  }
+  return Math.round(value * 10) / 10;
+}
+
 function parseBitrate(name: string): number | null {
   const unit =
     /(?:^|[^a-z0-9])(\d{2,4})(?:[._](\d+))?\s*(kbps|kbit|k|mbps|mbit|m|bps)(?=$|[^a-z0-9])/i.exec(
@@ -525,11 +542,21 @@ function humanizeName(value: string | null): string {
     .trim();
 }
 
+function isQualityLabel(value: string): boolean {
+  return /^(?:\d{3,4}p(?:\d{1,3})?|4k|8k|2k|hd|fhd|qhd|uhd|sd|hdr)$/i.test(
+    value.trim(),
+  );
+}
+
 /** Resolve a title without inventing metadata: specific label, Open Graph,
  * page title, filename, then the cleaned URL stem. */
 export function resolveMediaTitle(input: MediaTitleInput): string {
   const specific = cleanText(input.specific);
-  if (specific !== "" && !GENERIC_TITLES.has(specific.toLowerCase())) {
+  if (
+    specific !== "" &&
+    !GENERIC_TITLES.has(specific.toLowerCase()) &&
+    !isQualityLabel(specific)
+  ) {
     return specific;
   }
   const og = cleanText(input.ogTitle);
@@ -569,10 +596,17 @@ function mediaId(pageUrl: string, title: string, groupKey: string): string {
   return `media_${hash.toString(16).padStart(8, "0")}`;
 }
 
-function thumbnailFor(input: MediaPageInput): {
+function thumbnailFor(
+  input: MediaPageInput,
+  bucket: readonly Prepared[],
+): {
   readonly url: string | null;
   readonly kind: MediaThumbnailKind;
 } {
+  const candidate = bucket
+    .map((entry) => entry.poster)
+    .find((poster) => poster !== null);
+  if (candidate !== undefined) return { url: candidate, kind: "poster" };
   const poster = canonicalUrl(input.poster);
   if (poster !== null) return { url: poster, kind: "poster" };
   const openGraph = canonicalUrl(input.ogImage);
@@ -587,13 +621,15 @@ interface Prepared {
   readonly name: string;
   readonly kind: MediaKind;
   readonly height: number | null;
-  readonly label: string;
+  readonly bitrate: number | null;
   readonly format: string;
   readonly size: number | null;
   readonly hasAudio: boolean | null;
   readonly codec: string | null;
+  readonly duration: number | null;
   readonly source: MediaSource;
   readonly title: string;
+  readonly poster: string | null;
   readonly groupKey: string;
 }
 
@@ -628,13 +664,15 @@ function prepare(candidate: MediaCandidateInput): Prepared | null {
     name,
     kind,
     height,
-    label: variantLabel(kind, height, bitrate),
+    bitrate,
     format: formatOf(name),
     size,
     hasAudio,
     codec: parseCodec(name),
+    duration: explicitDuration(candidate.duration),
     source: validSource(candidate.source) ? candidate.source : "link",
     title: cleanText(candidate.title),
+    poster: canonicalUrl(candidate.poster),
     groupKey: `${family}\u0000${stem}`,
   };
 }
@@ -649,8 +687,11 @@ function mergePrepared(left: Prepared, right: Prepared): Prepared {
     size: left.size ?? right.size,
     hasAudio: left.hasAudio ?? right.hasAudio,
     codec: left.codec ?? right.codec,
+    bitrate: left.bitrate ?? right.bitrate,
+    duration: left.duration ?? right.duration,
     source: left.source === "link" ? right.source : left.source,
     title: left.title !== "" ? left.title : right.title,
+    poster: left.poster ?? right.poster,
   };
 }
 
@@ -659,11 +700,12 @@ function toVariant(prepared: Prepared): MediaVariant {
     url: prepared.url,
     kind: prepared.kind,
     height: prepared.height,
-    label: prepared.label,
+    label: variantLabel(prepared.kind, prepared.height, prepared.bitrate),
     format: prepared.format,
     size: prepared.size,
     hasAudio: prepared.hasAudio,
     codec: prepared.codec,
+    duration: prepared.duration,
     source: prepared.source,
   };
 }
@@ -674,7 +716,6 @@ export function buildMediaItems(input: MediaPageInput): readonly MediaItem[] {
   const pageUrl = canonicalUrl(input.pageUrl);
   if (pageUrl === null) return [];
   const page = new URL(pageUrl);
-  const thumbnail = thumbnailFor(input);
   const unique = new Map<string, Prepared>();
   for (const candidate of input.candidates) {
     const prepared = prepare(candidate);
@@ -714,6 +755,7 @@ export function buildMediaItems(input: MediaPageInput): readonly MediaItem[] {
       fileName: chosen.name,
       url: chosen.url,
     });
+    const thumbnail = thumbnailFor(input, bucket);
     const kind = variants.some((variant) => variant.kind === "video")
       ? "video"
       : variants.some((variant) => variant.kind === "audio")

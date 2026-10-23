@@ -157,6 +157,8 @@
     "audio",
     "media",
     "video player",
+    "media player",
+    "play video",
     "html5 video",
     "untitled",
     "untitled video",
@@ -331,6 +333,18 @@
     return value;
   }
 
+  function explicitDuration(value) {
+    if (
+      typeof value !== "number" ||
+      !Number.isFinite(value) ||
+      value <= 0 ||
+      value > 24 * 60 * 60
+    ) {
+      return null;
+    }
+    return Math.round(value * 10) / 10;
+  }
+
   function parseBitrate(name) {
     var unit =
       /(?:^|[^a-z0-9])(\d{2,4})(?:[._](\d+))?\s*(kbps|kbit|k|mbps|mbit|m|bps)(?=$|[^a-z0-9])/i.exec(
@@ -478,9 +492,19 @@
       .trim();
   }
 
+  function isQualityLabel(value) {
+    return /^(?:\d{3,4}p(?:\d{1,3})?|4k|8k|2k|hd|fhd|qhd|uhd|sd|hdr)$/i.test(
+      value.trim(),
+    );
+  }
+
   function resolveMediaTitle(input) {
     var specific = cleanText(input.specific);
-    if (specific !== "" && !GENERIC_TITLES.has(specific.toLowerCase())) {
+    if (
+      specific !== "" &&
+      !GENERIC_TITLES.has(specific.toLowerCase()) &&
+      !isQualityLabel(specific)
+    ) {
       return specific;
     }
     var og = cleanText(input.ogTitle);
@@ -522,7 +546,15 @@
     return "media_" + hash.toString(16).padStart(8, "0");
   }
 
-  function thumbnailFor(input) {
+  function thumbnailFor(input, bucket) {
+    var candidate = null;
+    for (var index = 0; index < bucket.length; index += 1) {
+      if (bucket[index].poster !== null) {
+        candidate = bucket[index].poster;
+        break;
+      }
+    }
+    if (candidate !== null) return { url: candidate, kind: "poster" };
     var poster = canonicalUrl(input.poster);
     if (poster !== null) return { url: poster, kind: "poster" };
     var openGraph = canonicalUrl(input.ogImage);
@@ -564,13 +596,15 @@
       name: name,
       kind: kind,
       height: height,
-      label: variantLabel(kind, height, bitrate),
+      bitrate: bitrate,
       format: formatOf(name),
       size: size,
       hasAudio: hasAudio,
       codec: parseCodec(name),
+      duration: explicitDuration(candidate.duration),
       source: validSource(candidate.source) ? candidate.source : "link",
       title: cleanText(candidate.title),
+      poster: canonicalUrl(candidate.poster),
       groupKey: family + "\u0000" + stem,
     };
   }
@@ -582,12 +616,15 @@
       kind:
         left.kind === "file" && right.kind !== "file" ? right.kind : left.kind,
       height: left.height === null ? right.height : left.height,
+      bitrate: left.bitrate === null ? right.bitrate : left.bitrate,
       format: left.format,
       size: left.size === null ? right.size : left.size,
       hasAudio: left.hasAudio === null ? right.hasAudio : left.hasAudio,
       codec: left.codec === null ? right.codec : left.codec,
+      duration: left.duration === null ? right.duration : left.duration,
       source: left.source === "link" ? right.source : left.source,
       title: left.title !== "" ? left.title : right.title,
+      poster: left.poster === null ? right.poster : left.poster,
       groupKey: left.groupKey,
     };
   }
@@ -597,11 +634,12 @@
       url: prepared.url,
       kind: prepared.kind,
       height: prepared.height,
-      label: prepared.label,
+      label: variantLabel(prepared.kind, prepared.height, prepared.bitrate),
       format: prepared.format,
       size: prepared.size,
       hasAudio: prepared.hasAudio,
       codec: prepared.codec,
+      duration: prepared.duration,
       source: prepared.source,
     };
   }
@@ -610,7 +648,6 @@
     var pageUrl = canonicalUrl(input.pageUrl);
     if (pageUrl === null) return [];
     var page = new URL(pageUrl);
-    var thumbnail = thumbnailFor(input);
     var unique = new Map();
     var candidates = Array.isArray(input.candidates) ? input.candidates : [];
     for (var index = 0; index < candidates.length; index += 1) {
@@ -664,6 +701,7 @@
         fileName: chosen.name,
         url: chosen.url,
       });
+      var thumbnail = thumbnailFor(input, bucket);
       var hasVideo = false;
       var hasAudio = false;
       for (var kindIndex = 0; kindIndex < variants.length; kindIndex += 1) {

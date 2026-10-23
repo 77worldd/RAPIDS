@@ -200,6 +200,17 @@ test("generic media titles never become the item title", () => {
   assert.equal(items[0].title, "movie 1080");
 });
 
+test("quality labels never become the item title", () => {
+  const items = build(
+    [
+      candidate("movie_1080.mp4", { title: "1080p" }),
+      candidate("movie_720.mp4", { title: "720p" }),
+    ],
+    { ogTitle: "The Movie" },
+  );
+  assert.equal(items[0].title, "The Movie");
+});
+
 test("poster, Open Graph image, then placeholder", () => {
   const poster = build([candidate("movie_1080.mp4")], {
     poster: "https://cdn.example.com/poster.jpg",
@@ -293,6 +304,34 @@ test("metadata is reported only when it is known", () => {
   assert.equal(variant.codec, null);
   assert.equal(variant.format, "WebM");
   assert.equal(variant.hasAudio, null);
+  assert.equal(variant.duration, null);
+});
+
+test("a video poster belongs to its own item, not the whole page", () => {
+  const items = build(
+    [
+      candidate("movie_1080.mp4", {
+        poster: "https://cdn.example.com/movie-poster.jpg",
+      }),
+      candidate("trailer_720.mp4"),
+    ],
+    { poster: "https://cdn.example.com/page-poster.jpg" },
+  );
+  const movie = items.find((item) => item.technicalName === "movie_1080.mp4");
+  const trailer = items.find(
+    (item) => item.technicalName === "trailer_720.mp4",
+  );
+  assert.equal(movie.thumbnailUrl, "https://cdn.example.com/movie-poster.jpg");
+  assert.equal(movie.thumbnailKind, "poster");
+  assert.equal(trailer.thumbnailUrl, "https://cdn.example.com/page-poster.jpg");
+  assert.equal(trailer.thumbnailKind, "poster");
+});
+
+test("duration is kept when the page reports it", () => {
+  const items = build([
+    candidate("movie_1080.mp4", { duration: 3725.4, height: 1080 }),
+  ]);
+  assert.equal(items[0].variants[0].duration, 3725.4);
 });
 
 test("codec, size, format, and source survive when supplied", () => {
@@ -311,6 +350,23 @@ test("codec, size, format, and source survive when supplied", () => {
   assert.equal(variant.height, 1080);
 });
 
+test("a duplicate URL gains quality metadata from a later candidate", () => {
+  const url = "https://cdn.example.com/movie.mp4";
+  const items = build([
+    at(url, "movie.mp4", { kind: "video", source: "link" }),
+    at(url, "movie.mp4", {
+      kind: "video",
+      height: 1080,
+      source: "videoSource",
+    }),
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].variants.length, 1);
+  assert.equal(items[0].variants[0].height, 1080);
+  assert.equal(items[0].variants[0].label, "1080p");
+  assert.equal(items[0].variants[0].source, "videoSource");
+});
+
 test("the extension mirror returns the same model as TypeScript", () => {
   const fixtures = [
     {
@@ -321,9 +377,11 @@ test("the extension mirror returns the same model as TypeScript", () => {
       poster: "https://cdn.example.com/poster.jpg",
       candidates: [
         candidate("movie_480.mp4", { size: 1000 }),
-        candidate("movie_1080.mp4", { size: 2000 }),
+        candidate("movie_1080.mp4", { size: 2000, duration: 3600 }),
         candidate("movie_audio_128.m4a", { size: 300 }),
-        candidate("trailer_720.mp4"),
+        candidate("trailer_720.mp4", {
+          poster: "https://cdn.example.com/trailer.jpg",
+        }),
       ],
     },
     {
@@ -343,6 +401,11 @@ test("the extension mirror returns the same model as TypeScript", () => {
           source: "navigation",
         }),
       ],
+    },
+    {
+      pageUrl: PAGE_URL,
+      ogTitle: "Parity Movie",
+      candidates: [candidate("movie_480.mp4", { title: "480p" })],
     },
   ];
   for (const fixture of fixtures) {
