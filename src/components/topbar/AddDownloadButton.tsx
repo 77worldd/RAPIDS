@@ -6,7 +6,7 @@ export function AddDownloadButton() {
   const { openAdd } = useAddDownload();
 
   return (
-    <Button onClick={() => openAdd()} className="shadow-[0_0_0_1px_rgba(16,185,129,0.16),0_8px_20px_-12px_rgba(16,185,129,0.7)]">
+    <Button onClick={() => openAdd()} className="shadow-[0_8px_20px_-12px_rgba(0,0,0,0.55)]">
       <Plus size={14} strokeWidth={2.2} />
       Add download
     </Button>
