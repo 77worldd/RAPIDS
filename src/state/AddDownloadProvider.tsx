@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -27,26 +28,49 @@ export function AddDownloadProvider({
   const [initialUrl, setInitialUrl] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<DeepLinkRequest | null>(null);
   const [session, setSession] = useState(0);
+  // A sheet shows one handoff at a time; keep later links in arrival order.
+  const queuedHandoffs = useRef<DeepLinkRequest[]>([]);
+  const sheetOpen = useRef(false);
 
-  const openAdd = useCallback((url?: string) => {
-    setHandoff(null);
-    setInitialUrl(url !== undefined && url.trim() !== "" ? url.trim() : null);
-    setSession((current) => current + 1);
-    setIsOpen(true);
-  }, []);
-
-  const openHandoff = useCallback((request: DeepLinkRequest) => {
+  const showHandoff = useCallback((request: DeepLinkRequest) => {
     setHandoff(request);
     setInitialUrl(request.url);
     setSession((current) => current + 1);
     setIsOpen(true);
+    sheetOpen.current = true;
   }, []);
 
+  const openAdd = useCallback((url?: string) => {
+    queuedHandoffs.current = [];
+    setHandoff(null);
+    setInitialUrl(url !== undefined && url.trim() !== "" ? url.trim() : null);
+    setSession((current) => current + 1);
+    setIsOpen(true);
+    sheetOpen.current = true;
+  }, []);
+
+  const openHandoff = useCallback(
+    (request: DeepLinkRequest) => {
+      if (sheetOpen.current) {
+        queuedHandoffs.current.push(request);
+        return;
+      }
+      showHandoff(request);
+    },
+    [showHandoff],
+  );
+
   const closeAdd = useCallback(() => {
+    const next = queuedHandoffs.current.shift();
+    if (next !== undefined) {
+      showHandoff(next);
+      return;
+    }
     setIsOpen(false);
     setInitialUrl(null);
     setHandoff(null);
-  }, []);
+    sheetOpen.current = false;
+  }, [showHandoff]);
 
   const value = useMemo<AddDownloadContextValue>(
     () => ({ isOpen, openAdd, openHandoff, closeAdd }),
