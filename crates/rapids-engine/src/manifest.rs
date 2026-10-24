@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::EngineError;
+use crate::headers::{HeaderProfile, RequestHeaders};
 
 pub const MANIFEST_VERSION: u32 = 1;
 pub const MANIFEST_FILE: &str = "manifest.json";
@@ -43,6 +44,16 @@ pub struct Manifest {
     pub last_modified: Option<String>,
     pub content_type: Option<String>,
     pub filename: Option<String>,
+    /// The header set the run that wrote this manifest actually sent. A resume
+    /// is only allowed when the fresh probe asks for exactly the same set, so
+    /// bytes saved behind one identity are never spliced into a run that asked
+    /// with another.
+    #[serde(default)]
+    pub headers: RequestHeaders,
+    /// The ladder step the probe resolved to. `header_profile` and `headers`
+    /// are stored together because one describes how the other was chosen.
+    #[serde(default)]
+    pub header_profile: HeaderProfile,
     pub expected_sha256: Option<String>,
     pub observed_sha256: Option<String>,
     pub created_at: u64,
@@ -81,15 +92,21 @@ impl Manifest {
     }
 
     /// Resume gate: a stored download may only continue when it recorded
-    /// range support, a size, and a validator that the server still agrees
-    /// with. Anything else restarts from zero.
+    /// range support, a size, a validator that the server still agrees with,
+    /// and the header set this run is about to send. Anything else restarts
+    /// from zero.
     pub fn can_resume(
         &self,
         fresh_total: Option<u64>,
         fresh_etag: Option<&str>,
         fresh_last_modified: Option<&str>,
+        profile: HeaderProfile,
+        headers: &RequestHeaders,
     ) -> bool {
         if !self.accepts_ranges {
+            return false;
+        }
+        if !self.headers_match(profile, headers) {
             return false;
         }
         let stored_total = match self.total_bytes {
@@ -107,6 +124,13 @@ impl Manifest {
             return fresh_last_modified == Some(stored);
         }
         false
+    }
+
+    /// Whether the header set this run is about to send is the one the stored
+    /// bytes were fetched with. Both the ladder step and the concrete headers
+    /// have to agree: two runs can reach the same step with different cookies.
+    pub fn headers_match(&self, profile: HeaderProfile, headers: &RequestHeaders) -> bool {
+        self.header_profile == profile && &self.headers == &profile.apply(headers)
     }
 
     /// Progress checkpoint: copies the in-memory flushed offsets into the

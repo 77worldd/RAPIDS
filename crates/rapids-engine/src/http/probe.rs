@@ -6,8 +6,11 @@ use reqwest::header::{
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
+use crate::headers::{HeaderProfile, RequestHeaders};
 
-use super::{header_accepts_bytes, header_str, header_u64};
+use super::{
+    base_backoff, header_accepts_bytes, header_str, header_u64, jittered_backoff, now_entropy,
+};
 
 /// What the server told us about the file during the probe phase.
 #[derive(Debug, Clone)]
@@ -19,21 +22,47 @@ pub(crate) struct ProbeResult {
     pub last_modified: Option<String>,
     pub content_type: Option<String>,
     pub filename: Option<String>,
+    /// Which header set the successful probe used. The transfer reuses it, so
+    /// the bytes that arrive are the ones that set of headers asked for.
+    pub headers_used: HeaderProfile,
 }
 
 /// A probe failure worth retrying versus one that ends the task.
 pub(crate) enum ProbeFailure {
-    Retry { reason: String, timed_out: bool },
+    Retry {
+        reason: String,
+        timed_out: bool,
+    },
+    /// The server refused this header set; the ladder moves to the next one.
+    TryNext {
+        status: u16,
+    },
     Fatal(EngineError),
 }
 
-/// Discovers size, range support, validators, and a filename. Retries with
-/// backoff while the failure class allows it; 4xx statuses other than the
-/// transient ones end the task with a readable message.
+/// Statuses that mean "this request was not acceptable" rather than "the
+/// server is broken". Walking the ladder re-asks with a weaker identity
+/// instead of failing a download that a browser would have been given.
+const LADDER_STATUSES: [u16; 4] = [403, 406, 416, 429];
+
+fn is_ladder_status(status: u16) -> bool {
+    LADDER_STATUSES.contains(&status)
+}
+
+/// Discovers size, range support, validators, and a filename.
+///
+/// A server that rejects a probe with 403, 406, 416, or 429 is usually
+/// objecting to the identity the request carried, so the probe walks a ladder
+/// of progressively weaker header sets: the full set with a range request,
+/// the full set without one, no cookies, then no identity at all. The first
+/// step that succeeds is recorded on the result and reused verbatim for the
+/// transfer, which keeps the resume gate honest: bytes saved under one header
+/// set are never spliced into a run that asked with another.
 pub(crate) async fn probe(
     url: &str,
     config: &EngineConfig,
     client: &reqwest::Client,
+    headers: &RequestHeaders,
 ) -> Result<ProbeResult, EngineError> {
     if let Err(error) = reqwest::Url::parse(url) {
         return Err(EngineError::InvalidUrl {
@@ -42,6 +71,72 @@ pub(crate) async fn probe(
         });
     }
 
+    let ladder: [(HeaderProfile, bool); 4] = [
+        (HeaderProfile::Full, true),
+        (HeaderProfile::Full, false),
+        (HeaderProfile::NoCookies, true),
+        (HeaderProfile::NoIdentity, true),
+    ];
+
+    let mut rejected: Option<u16> = None;
+    let mut exhausted: Option<ProbeFailure> = None;
+    for (profile, use_range) in ladder {
+        match probe_once(url, config, client, &profile.apply(headers), use_range).await {
+            Ok(mut result) => {
+                result.headers_used = profile;
+                return Ok(result);
+            }
+            Err(ProbeFailure::Fatal(error)) => {
+                // A 401 is not a header the ladder can fix; it means the
+                // credentials themselves are missing or wrong.
+                if matches!(error, EngineError::HttpStatus { status: 401, .. }) {
+                    return Err(EngineError::AuthorizationRequired {
+                        url: url.to_string(),
+                    });
+                }
+                return Err(error);
+            }
+            Err(ProbeFailure::Retry { reason, timed_out }) => {
+                exhausted = Some(ProbeFailure::Retry { reason, timed_out });
+            }
+            Err(ProbeFailure::TryNext { status }) => {
+                rejected = Some(status);
+            }
+        }
+    }
+
+    match exhausted {
+        Some(ProbeFailure::Retry { reason, timed_out }) => {
+            if timed_out {
+                Err(EngineError::timeout(
+                    "server probe",
+                    reason,
+                    config.max_attempts,
+                ))
+            } else {
+                Err(EngineError::network(
+                    "server probe",
+                    reason,
+                    config.max_attempts,
+                ))
+            }
+        }
+        _ => Err(EngineError::HttpStatus {
+            status: rejected.unwrap_or(403),
+            url: url.to_string(),
+        }),
+    }
+}
+
+/// One ladder step: its own retry budget for transient failures, then a single
+/// `TryNext` when the server refuses the header set outright.
+async fn probe_once(
+    url: &str,
+    config: &EngineConfig,
+    client: &reqwest::Client,
+    headers: &RequestHeaders,
+    use_range: bool,
+) -> Result<ProbeResult, ProbeFailure> {
     let mut attempt = 0u32;
     loop {
         // A probe may retry after a long backoff. Keep the shared slot only
@@ -58,31 +153,32 @@ pub(crate) async fn probe(
             None
         };
         attempt += 1;
-        let result = probe_once(url, config, client).await;
+        let result = probe_once_attempt(url, config, client, headers, use_range).await;
         drop(lease);
         match result {
             Ok(result) => return Ok(result),
-            Err(ProbeFailure::Fatal(error)) => return Err(error),
+            Err(ProbeFailure::Fatal(error)) => return Err(ProbeFailure::Fatal(error)),
+            Err(ProbeFailure::TryNext { status }) => {
+                return Err(ProbeFailure::TryNext { status });
+            }
             Err(ProbeFailure::Retry { reason, timed_out }) => {
                 if attempt >= config.max_attempts {
-                    return if timed_out {
-                        Err(EngineError::timeout("server probe", reason, attempt))
-                    } else {
-                        Err(EngineError::network("server probe", reason, attempt))
-                    };
+                    return Err(ProbeFailure::Retry { reason, timed_out });
                 }
-                let base = super::base_backoff(config, attempt);
-                let delay = super::jittered_backoff(base, super::now_entropy());
+                let base = base_backoff(config, attempt);
+                let delay = jittered_backoff(base, now_entropy());
                 tokio::time::sleep(delay).await;
             }
         }
     }
 }
 
-async fn probe_once(
+async fn probe_once_attempt(
     url: &str,
     config: &EngineConfig,
     client: &reqwest::Client,
+    headers: &RequestHeaders,
+    use_range: bool,
 ) -> Result<ProbeResult, ProbeFailure> {
     let mut result = ProbeResult {
         final_url: String::new(),
@@ -92,25 +188,30 @@ async fn probe_once(
         last_modified: None,
         content_type: None,
         filename: None,
+        headers_used: HeaderProfile::Full,
     };
 
     // --- HEAD: cheap metadata when the server allows it -----------------
-    let head_response =
-        match tokio::time::timeout(config.header_timeout, client.head(url).send()).await {
-            Err(_) => {
-                return Err(ProbeFailure::Retry {
-                    reason: "HEAD request exceeded the header timeout".to_string(),
-                    timed_out: true,
-                });
-            }
-            Ok(Err(error)) => {
-                return Err(ProbeFailure::Retry {
-                    reason: format!("HEAD connection failed: {error}"),
-                    timed_out: false,
-                });
-            }
-            Ok(Ok(response)) => response,
-        };
+    let head_response = match tokio::time::timeout(
+        config.header_timeout,
+        headers.apply(client.head(url)).send(),
+    )
+    .await
+    {
+        Err(_) => {
+            return Err(ProbeFailure::Retry {
+                reason: "HEAD request exceeded the header timeout".to_string(),
+                timed_out: true,
+            });
+        }
+        Ok(Err(error)) => {
+            return Err(ProbeFailure::Retry {
+                reason: format!("HEAD connection failed: {error}"),
+                timed_out: false,
+            });
+        }
+        Ok(Ok(response)) => response,
+    };
     let head_status = head_response.status().as_u16();
     let (head_saw_ranges, need_get) = match head_status {
         200..=299 => {
@@ -127,6 +228,12 @@ async fn probe_once(
             // length still needs a body-less look.
             (saw_ranges, saw_ranges || result.total.is_none())
         }
+        401 => {
+            return Err(ProbeFailure::Fatal(EngineError::HttpStatus {
+                status: 401,
+                url: url.to_string(),
+            }));
+        }
         405 | 501 => (false, true),
         408 | 429 | 500..=599 => {
             return Err(ProbeFailure::Retry {
@@ -134,6 +241,9 @@ async fn probe_once(
                 timed_out: false,
             });
         }
+        // A server that refuses HEAD may still answer a GET, so this is not
+        // fatal on its own; the ladder decides whether anything was acceptable.
+        403 | 406 | 416 => (false, true),
         _ => {
             return Err(ProbeFailure::Fatal(EngineError::HttpStatus {
                 status: head_status,
@@ -145,10 +255,11 @@ async fn probe_once(
 
     // --- GET: confirm range support, catch whatever HEAD could not ------
     if need_get {
-        let request = if head_saw_ranges {
-            client.get(url).header(RANGE, "bytes=0-0")
+        let request = headers.apply(client.get(url));
+        let request = if use_range && head_saw_ranges {
+            request.header(RANGE, "bytes=0-0")
         } else {
-            client.get(url)
+            request
         };
         let response = match tokio::time::timeout(config.header_timeout, request.send()).await {
             Err(_) => {
@@ -166,67 +277,72 @@ async fn probe_once(
             Ok(Ok(response)) => response,
         };
         let status = response.status().as_u16();
-        match status {
-            200..=299 => {
-                if result.final_url.is_empty() {
-                    result.final_url = response.url().to_string();
-                }
-                if result.etag.is_none() {
-                    result.etag = header_str(&response, &ETAG);
-                }
-                if result.last_modified.is_none() {
-                    result.last_modified = header_str(&response, &LAST_MODIFIED);
-                }
-                if result.content_type.is_none() {
-                    result.content_type = header_str(&response, &CONTENT_TYPE);
-                }
-                if result.filename.is_none()
-                    && let Some(disposition) = header_str(&response, &CONTENT_DISPOSITION)
-                {
-                    result.filename = filename_from_content_disposition(&disposition);
-                }
-                if status == 206 {
-                    // A 206 answer to the ranged probe is the behavioural
-                    // proof that range support is real; only a header that
-                    // already claimed support counts (servers that ignore
-                    // Range while pretending otherwise fall through here).
-                    if result.total.is_none()
-                        && let Some((_, _, total)) = parse_content_range(&response)
+        if is_ladder_status(status) {
+            // `bytes 0-0` against an empty file reports `*/0`; that is a real
+            // answer, not a refusal.
+            let empty_file = status == 416
+                && parse_content_range(&response).is_some_and(|(_, _, total)| total == Some(0));
+            if empty_file {
+                result.total = Some(0);
+            } else {
+                return Err(ProbeFailure::TryNext { status });
+            }
+        } else {
+            match status {
+                200..=299 => {
+                    if result.final_url.is_empty() {
+                        result.final_url = response.url().to_string();
+                    }
+                    if result.etag.is_none() {
+                        result.etag = header_str(&response, &ETAG);
+                    }
+                    if result.last_modified.is_none() {
+                        result.last_modified = header_str(&response, &LAST_MODIFIED);
+                    }
+                    if result.content_type.is_none() {
+                        result.content_type = header_str(&response, &CONTENT_TYPE);
+                    }
+                    if result.filename.is_none()
+                        && let Some(disposition) = header_str(&response, &CONTENT_DISPOSITION)
                     {
-                        result.total = total;
+                        result.filename = filename_from_content_disposition(&disposition);
                     }
-                    result.accepts_ranges = head_saw_ranges;
-                } else {
-                    result.accepts_ranges = false;
-                    if result.total.is_none() {
-                        result.total = header_u64(&response, &CONTENT_LENGTH);
-                    }
-                }
-            }
-            416 => {
-                // `bytes 0-0` against an empty file reports `*/0`.
-                match parse_content_range(&response) {
-                    Some((_, _, Some(0))) => {
-                        result.total = Some(0);
-                    }
-                    _ => {
-                        return Err(ProbeFailure::Fatal(EngineError::protocol(
-                            "range probe was rejected with an unexpected Content-Range",
-                        )));
+                    if status == 206 {
+                        // A 206 answer to the ranged probe is the behavioural
+                        // proof that range support is real; only a header that
+                        // already claimed support counts (servers that ignore
+                        // Range while pretending otherwise fall through here).
+                        if result.total.is_none()
+                            && let Some((_, _, total)) = parse_content_range(&response)
+                        {
+                            result.total = total;
+                        }
+                        result.accepts_ranges = head_saw_ranges;
+                    } else {
+                        result.accepts_ranges = false;
+                        if result.total.is_none() {
+                            result.total = header_u64(&response, &CONTENT_LENGTH);
+                        }
                     }
                 }
-            }
-            408 | 429 | 500..=599 => {
-                return Err(ProbeFailure::Retry {
-                    reason: format!("GET probe returned HTTP {status}"),
-                    timed_out: false,
-                });
-            }
-            _ => {
-                return Err(ProbeFailure::Fatal(EngineError::HttpStatus {
-                    status,
-                    url: url.to_string(),
-                }));
+                401 => {
+                    return Err(ProbeFailure::Fatal(EngineError::HttpStatus {
+                        status: 401,
+                        url: url.to_string(),
+                    }));
+                }
+                408 | 500..=599 => {
+                    return Err(ProbeFailure::Retry {
+                        reason: format!("GET probe returned HTTP {status}"),
+                        timed_out: false,
+                    });
+                }
+                _ => {
+                    return Err(ProbeFailure::Fatal(EngineError::HttpStatus {
+                        status,
+                        url: url.to_string(),
+                    }));
+                }
             }
         }
         drop(response);
@@ -364,6 +480,16 @@ fn hex_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ladder_statuses_are_the_documented_set() {
+        for status in [403, 406, 416, 429] {
+            assert!(is_ladder_status(status), "{status} walks the ladder");
+        }
+        for status in [200, 206, 401, 404, 410, 500] {
+            assert!(!is_ladder_status(status), "{status} must not");
+        }
+    }
 
     #[test]
     fn parses_content_range_forms() {

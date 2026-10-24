@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
+use crate::headers::RequestHeaders;
 use crate::rate::RateLimits;
 use crate::segmenter::Segment;
 
@@ -69,6 +70,10 @@ pub(crate) struct DownloadContext {
     pub last_modified: Option<String>,
     pub accepts_ranges: bool,
     pub total: Option<u64>,
+    /// The header set the probe proved the server accepts, applied to every
+    /// request this download makes. It is the ladder step the probe resolved
+    /// to, already resolved to concrete headers.
+    pub headers: RequestHeaders,
     /// Every bandwidth ceiling that applies to this download.
     pub limits: RateLimits,
 }
@@ -300,7 +305,11 @@ async fn attempt_segment(
             AttemptFailure::Fatal(EngineError::io("seek part file", &context.part_path, error))
         })?;
 
-    let mut request = context.client.get(&context.final_url);
+    // The probe proved this header set is what the server accepts; the
+    // transfer sends exactly it, and nothing the ladder dropped on the way.
+    let mut request = context
+        .headers
+        .apply(context.client.get(&context.final_url));
     if ranged {
         let range_end = segment.end;
         request = request.header(RANGE, format!("bytes={start_offset}-{range_end}"));

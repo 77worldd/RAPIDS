@@ -1,3 +1,4 @@
+use rapids_engine::headers::{HeaderProfile, RequestHeaders};
 use rapids_engine::{Manifest, SegmentState};
 
 fn sample_manifest() -> Manifest {
@@ -12,6 +13,8 @@ fn sample_manifest() -> Manifest {
         last_modified: Some("Wed, 21 Oct 2026 07:28:00 GMT".to_string()),
         content_type: Some("application/octet-stream".to_string()),
         filename: Some("payload.bin".to_string()),
+        headers: RequestHeaders::default(),
+        header_profile: HeaderProfile::Full,
         expected_sha256: None,
         observed_sha256: None,
         created_at: 1_761_000_000,
@@ -91,35 +94,101 @@ async fn progress_recording_and_completion_check() {
 fn resume_requires_matching_validator_and_size() {
     let stored = sample_manifest();
 
-    assert!(stored.can_resume(Some(100), Some("\"v1\""), None));
+    assert!(stored.can_resume(
+        Some(100),
+        Some("\"v1\""),
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
     // The stored ETag is the preferred validator: when the manifest holds one,
     // the fresh probe must re-present it. A matching Last-Modified cannot
     // clear the gate once the fresh response drops the ETag, because the
     // validators are no longer comparable — the gate wipes and restarts.
-    assert!(!stored.can_resume(Some(100), None, Some("Wed, 21 Oct 2026 07:28:00 GMT")));
+    assert!(!stored.can_resume(
+        Some(100),
+        None,
+        Some("Wed, 21 Oct 2026 07:28:00 GMT"),
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
 
-    assert!(!stored.can_resume(Some(101), Some("\"v1\""), None));
-    assert!(!stored.can_resume(Some(100), Some("\"v2\""), None));
-    assert!(!stored.can_resume(Some(100), None, None));
-    assert!(!stored.can_resume(None, Some("\"v1\""), None));
+    assert!(!stored.can_resume(
+        Some(101),
+        Some("\"v1\""),
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
+    assert!(!stored.can_resume(
+        Some(100),
+        Some("\"v2\""),
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
+    assert!(!stored.can_resume(
+        Some(100),
+        None,
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
+    assert!(!stored.can_resume(
+        None,
+        Some("\"v1\""),
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
 
     let mut no_etag = sample_manifest();
     no_etag.etag = None;
-    assert!(no_etag.can_resume(Some(100), None, Some("Wed, 21 Oct 2026 07:28:00 GMT")));
-    assert!(!no_etag.can_resume(Some(100), None, Some("different date")));
+    assert!(no_etag.can_resume(
+        Some(100),
+        None,
+        Some("Wed, 21 Oct 2026 07:28:00 GMT"),
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
+    assert!(!no_etag.can_resume(
+        Some(100),
+        None,
+        Some("different date"),
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
 
     let mut no_validators = sample_manifest();
     no_validators.etag = None;
     no_validators.last_modified = None;
-    assert!(!no_validators.can_resume(Some(100), Some("\"v1\""), None));
+    assert!(!no_validators.can_resume(
+        Some(100),
+        Some("\"v1\""),
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
 
     let mut no_ranges = sample_manifest();
     no_ranges.accepts_ranges = false;
-    assert!(!no_ranges.can_resume(Some(100), Some("\"v1\""), None));
+    assert!(!no_ranges.can_resume(
+        Some(100),
+        Some("\"v1\""),
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
 
     let mut no_size = sample_manifest();
     no_size.total_bytes = None;
-    assert!(!no_size.can_resume(None, Some("\"v1\""), None));
+    assert!(!no_size.can_resume(
+        None,
+        Some("\"v1\""),
+        None,
+        HeaderProfile::Full,
+        &RequestHeaders::default()
+    ));
 }
 
 #[test]

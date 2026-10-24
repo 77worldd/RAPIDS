@@ -33,6 +33,8 @@ pub enum EngineError {
     DestinationExists { path: PathBuf },
     /// Another live process holds the workspace lock.
     WorkspaceLocked { path: PathBuf },
+    /// The server demanded credentials the task does not carry.
+    AuthorizationRequired { url: String },
     /// Local disk interaction failed.
     Io {
         operation: &'static str,
@@ -100,6 +102,7 @@ impl EngineError {
             Self::InvalidUrl { .. }
             | Self::InvalidSpec { .. }
             | Self::Protocol { .. }
+            | Self::AuthorizationRequired { .. }
             | Self::DestinationExists { .. }
             | Self::Io { .. }
             | Self::VerificationFailed { .. } => false,
@@ -144,6 +147,10 @@ impl fmt::Display for EngineError {
                 f,
                 "{} already exists; pass --overwrite to replace it",
                 path.display()
+            ),
+            Self::AuthorizationRequired { url } => write!(
+                f,
+                "the server requires authorization for {url}: open the download, fill in the authentication fields, and start it again"
             ),
             Self::WorkspaceLocked { path } => {
                 write!(f, "another RAPIDS process is working on {}", path.display())

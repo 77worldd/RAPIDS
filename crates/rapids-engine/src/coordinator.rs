@@ -10,6 +10,7 @@ use tokio::time::MissedTickBehavior;
 use crate::config::EngineConfig;
 use crate::error::EngineError;
 use crate::events::{DownloadState, EngineEvent};
+use crate::headers::{HeaderProfile, RequestHeaders};
 use crate::http::fetch::{
     Control, CoordMsg, DownloadContext, WorkQueue, apply_control, worker_loop,
 };
@@ -31,6 +32,8 @@ pub struct DownloadSpec {
     /// 8 → 32 dynamic behaviour. A shared budget may allow fewer requests.
     pub connections: Option<u8>,
     pub overwrite: bool,
+    /// Headers and credentials the probe sends and the transfer repeats.
+    pub headers: RequestHeaders,
 }
 
 struct HandleInner {
@@ -194,6 +197,9 @@ struct Prepared {
     workspace: Workspace,
     stored: Option<Manifest>,
     client: reqwest::Client,
+    /// The ladder step the probe resolved to. It selects the header set the
+    /// transfer repeats and is part of the resume gate.
+    profile: HeaderProfile,
 }
 
 /// One tick of the coordinator's select loop.
@@ -492,7 +498,12 @@ impl Coordinator {
         // is waiting for a connection budget lease.
         let probe_result = {
             let mut wake = self.control_rx.clone();
-            let mut probe_fut = Box::pin(probe::probe(&self.spec.url, &self.config, &client));
+            let mut probe_fut = Box::pin(probe::probe(
+                &self.spec.url,
+                &self.config,
+                &client,
+                &self.spec.headers,
+            ));
             loop {
                 tokio::select! {
                     result = &mut probe_fut => break result,
@@ -528,6 +539,7 @@ impl Coordinator {
                 return None;
             }
         };
+        let profile = probe.headers_used;
 
         // Default destination: server-provided filename, then the URL's
         // last meaningful segment.
@@ -596,6 +608,7 @@ impl Coordinator {
             workspace,
             stored,
             client,
+            profile,
         })
     }
 
@@ -610,6 +623,7 @@ impl Coordinator {
             mut workspace,
             stored,
             client,
+            profile,
         } = prepared;
         let flags = *self.control_rx.borrow();
         if flags.cancelled {
@@ -629,6 +643,9 @@ impl Coordinator {
         // --- plan: resume what is verifiably resumable, else restart ----
         // The part file must exist and match the fresh size exactly;
         // anything less risks sparse zeros where a segment assumed data.
+        // The header set counts as one of the proofs too: bytes saved behind
+        // one identity may not be continued under another.
+        let effective_headers = profile.apply(&self.spec.headers);
         let part_matches_size = match (tokio::fs::metadata(&workspace.part_path).await, probe.total)
         {
             (Ok(metadata), Some(total)) => metadata.len() == total,
@@ -640,6 +657,8 @@ impl Coordinator {
                     probe.total,
                     probe.etag.as_deref(),
                     probe.last_modified.as_deref(),
+                    profile,
+                    &self.spec.headers,
                 )
                 && part_matches_size
         });
@@ -660,7 +679,7 @@ impl Coordinator {
                     self.fail(error).await;
                     return;
                 }
-                let fresh = build_manifest(&self.spec, probe, &self.config, &dest);
+                let fresh = build_manifest(&self.spec, probe, profile, &self.config, &dest);
                 if let Err(error) = self.create_part(&workspace, &fresh).await {
                     self.fail(error).await;
                     return;
@@ -686,6 +705,7 @@ impl Coordinator {
             last_modified: manifest.last_modified.clone(),
             accepts_ranges: manifest.accepts_ranges,
             total: manifest.total_bytes,
+            headers: effective_headers,
             limits,
         });
         let progress: Arc<Vec<AtomicU64>> = Arc::new(
@@ -1101,6 +1121,7 @@ fn incomplete_segments(manifest: &Manifest, progress: &[AtomicU64]) -> Vec<Segme
 fn build_manifest(
     spec: &DownloadSpec,
     probe: probe::ProbeResult,
+    profile: HeaderProfile,
     config: &EngineConfig,
     dest: &Path,
 ) -> Manifest {
@@ -1143,6 +1164,8 @@ fn build_manifest(
         last_modified: probe.last_modified,
         content_type: probe.content_type,
         filename: probe.filename,
+        headers: profile.apply(&spec.headers),
+        header_profile: profile,
         expected_sha256: spec
             .expected_sha256
             .as_ref()

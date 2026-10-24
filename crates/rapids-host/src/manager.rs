@@ -10,7 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rapids_engine::{
-    ConnectionBudget, DownloadHandle, DownloadSpec, EngineConfig, RateLimiter, filename_from_url,
+    ConnectionBudget, DownloadHandle, DownloadSpec, EngineConfig, RateLimiter, RequestHeaders,
+    filename_from_url,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -511,6 +512,7 @@ impl Manager {
                 .and_then(|value| u8::try_from(value).ok())
                 .map(|connections| connections.clamp(1, MAX_CONNECTIONS_PER_TASK)),
             overwrite: false,
+            headers: RequestHeaders::default(),
         };
         let config = EngineConfig {
             rate_limit_bps: row

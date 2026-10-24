@@ -5,7 +5,8 @@ use std::task::{Context, Waker};
 use std::time::{Duration, Instant};
 
 use rapids_engine::{
-    DownloadSpec, EngineConfig, EngineEvent, RateLimiter, RateLimits, sha256_file, spawn_download,
+    DownloadSpec, EngineConfig, EngineEvent, RateLimiter, RateLimits, RequestHeaders, sha256_file,
+    spawn_download,
 };
 use rapids_test_support::{TestServer, expected_sha256, options};
 
@@ -16,6 +17,7 @@ fn spec_for(url: &str, dest: &Path, connections: u8) -> DownloadSpec {
         expected_sha256: None,
         connections: Some(connections),
         overwrite: false,
+        headers: RequestHeaders::default(),
     }
 }
 

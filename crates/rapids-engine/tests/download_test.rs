@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use rapids_engine::headers::{HeaderProfile, RequestHeaders};
 use rapids_engine::{DownloadSpec, EngineConfig, EngineEvent, Manifest, Workspace, spawn_download};
 use rapids_test_support::{TestServer, expected_sha256, options};
 
@@ -43,6 +44,7 @@ fn spec_for(url: &str, dest: &Path) -> DownloadSpec {
         expected_sha256: None,
         connections: None,
         overwrite: false,
+        headers: RequestHeaders::default(),
     }
 }
 
@@ -253,7 +255,9 @@ async fn stopping_releases_the_workspace_for_a_byte_perfect_restart() {
     assert!(saved.can_resume(
         Some(total),
         saved.etag.as_deref(),
-        saved.last_modified.as_deref()
+        saved.last_modified.as_deref(),
+        HeaderProfile::Full,
+        &RequestHeaders::default()
     ));
 
     // The first handle is deliberately still alive: stop, not dropping the

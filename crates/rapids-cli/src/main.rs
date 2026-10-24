@@ -27,6 +27,7 @@ async fn run_get(args: cli::GetArgs) -> ExitCode {
         expected_sha256: args.sha256,
         connections: args.connections,
         overwrite: args.overwrite,
+        headers: rapids_engine::RequestHeaders::default(),
     };
     let (handle, mut events) = match spawn_download(spec, EngineConfig::default()) {
         Ok(pair) => pair,

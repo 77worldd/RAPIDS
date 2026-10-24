@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rapids_engine::{
-    ConnectionBudget, DownloadSpec, EngineConfig, EngineEvent, sha256_file, spawn_download,
+    ConnectionBudget, DownloadSpec, EngineConfig, EngineEvent, RequestHeaders, sha256_file,
+    spawn_download,
 };
 use rapids_test_support::{TestServer, expected_sha256, options};
 
@@ -14,6 +15,7 @@ fn download(url: &str, dest: &Path) -> DownloadSpec {
         expected_sha256: None,
         connections: Some(4),
         overwrite: false,
+        headers: RequestHeaders::default(),
     }
 }
 

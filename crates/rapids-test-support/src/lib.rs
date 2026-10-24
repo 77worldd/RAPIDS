@@ -62,6 +62,12 @@ pub struct ServerOptions {
     pub flaky_every: Option<u32>,
     /// Bytes delivered before a flaky drop.
     pub flaky_after: u64,
+    /// Answer 403 to any request that carries a `Cookie` header. Exercises
+    /// the probe ladder's "drop cookies and try again" rung.
+    pub reject_cookies: bool,
+    /// Answer 403 to any request carrying cookies, a `Referer` or a
+    /// `User-Agent`: the "drop identity and try again" rung.
+    pub reject_identity: bool,
 }
 
 /// Options for a server serving the canonical payload.
@@ -75,6 +81,8 @@ pub fn options(total: u64) -> ServerOptions {
         throttle_bps: None,
         flaky_every: None,
         flaky_after: 0,
+        reject_cookies: false,
+        reject_identity: false,
     }
 }
 
@@ -84,6 +92,12 @@ pub struct RequestRecord {
     pub method: String,
     pub range: Option<String>,
     pub if_range: Option<String>,
+    /// `Cookie` header, when the client sent one.
+    pub cookie: Option<String>,
+    /// `Referer` header, when the client sent one.
+    pub referer: Option<String>,
+    /// `User-Agent` header, when the client sent one.
+    pub user_agent: Option<String>,
     pub status: u16,
     /// Bytes actually written to the client (0 for HEAD).
     pub body_len: u64,
@@ -221,14 +235,20 @@ fn handle_connection(mut stream: TcpStream, state: &ServerState) {
 
     let mut range_header: Option<String> = None;
     let mut if_range_header: Option<String> = None;
+    let mut cookie_header: Option<String> = None;
+    let mut referer_header: Option<String> = None;
+    let mut user_agent_header: Option<String> = None;
     for line in lines {
         if let Some((key, value)) = line.split_once(':') {
             let key = key.trim().to_ascii_lowercase();
             let value = value.trim().to_string();
-            if key == "range" {
-                range_header = Some(value);
-            } else if key == "if-range" {
-                if_range_header = Some(value);
+            match key.as_str() {
+                "range" => range_header = Some(value),
+                "if-range" => if_range_header = Some(value),
+                "cookie" => cookie_header = Some(value),
+                "referer" => referer_header = Some(value),
+                "user-agent" => user_agent_header = Some(value),
+                _ => {}
             }
         }
     }
@@ -237,9 +257,26 @@ fn handle_connection(mut stream: TcpStream, state: &ServerState) {
         method: method.clone(),
         range: range_header.clone(),
         if_range: if_range_header.clone(),
+        cookie: cookie_header.clone(),
+        referer: referer_header.clone(),
+        user_agent: user_agent_header.clone(),
         status: 0,
         body_len: 0,
     };
+
+    // Header-based refusal drives the probe ladder's weaker rungs.
+    let has_identity =
+        cookie_header.is_some() || referer_header.is_some() || user_agent_header.is_some();
+    if (options.reject_cookies && cookie_header.is_some())
+        || (options.reject_identity && has_identity)
+    {
+        record.status = 403;
+        let _ = stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        let _ = stream.flush();
+        state.requests.lock().unwrap().push(record);
+        return;
+    }
 
     let response: Vec<u8> = match method.as_str() {
         "HEAD" => {
