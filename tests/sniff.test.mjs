@@ -6,6 +6,7 @@ import {
   receiveSniffCandidate,
   selectSniffCandidate,
   sniffCandidateLabel,
+  sniffPageMetadata,
   toInspectorUrl,
   toSniffCandidate,
 } from "../src/lib/sniff.ts";
@@ -14,8 +15,28 @@ const PAGE = "http://127.0.0.1:53001/page.html";
 const CLIP = "http://127.0.0.1:53001/clip.mp4?signature=Q%2B9";
 const TRAILER = "http://127.0.0.1:53001/trailer.mp4";
 
+const EMPTY_META = {
+  title: null,
+  poster: null,
+  height: null,
+  duration: null,
+  pageTitle: null,
+  siteName: null,
+  ogTitle: null,
+  twitterTitle: null,
+  ogImage: null,
+  twitterImage: null,
+};
+
 function candidate(changes = {}) {
-  return { session: 7, pageUrl: PAGE, url: CLIP, source: "video", ...changes };
+  return {
+    session: 7,
+    pageUrl: PAGE,
+    url: CLIP,
+    source: "video",
+    meta: { ...EMPTY_META },
+    ...changes,
+  };
 }
 
 test("opening the inspector requires a bounded credential-free HTTP URL", () => {
@@ -78,6 +99,58 @@ test("invalid or nonconforming native events cannot enter the inbox", () => {
   for (const payload of invalid) {
     assert.equal(toSniffCandidate(payload), null);
   }
+});
+
+test("inspector metadata is bounded and duplicate URLs gain missing values", () => {
+  const parsed = toSniffCandidate(
+    candidate({
+      meta: {
+        ...EMPTY_META,
+        title: "  The   Movie  ",
+        poster: "http://127.0.0.1:53001/poster.png#fragment",
+        height: 0,
+        duration: Number.NaN,
+        pageTitle: "The Movie (2024) - Example Site",
+        siteName: "Example Site",
+        ogTitle: "The Movie (2024)",
+        ogImage: "javascript:alert(1)",
+        twitterImage: "http://127.0.0.1:53001/twitter.png",
+      },
+    }),
+  );
+  assert.ok(parsed);
+  assert.equal(parsed.meta.title, "The Movie");
+  assert.equal(parsed.meta.poster, "http://127.0.0.1:53001/poster.png");
+  assert.equal(parsed.meta.height, null);
+  assert.equal(parsed.meta.duration, null);
+  assert.equal(parsed.meta.ogTitle, "The Movie (2024)");
+  assert.equal(parsed.meta.ogImage, null);
+  assert.equal(parsed.meta.twitterImage, "http://127.0.0.1:53001/twitter.png");
+
+  const richer = toSniffCandidate(
+    candidate({
+      meta: {
+        ...EMPTY_META,
+        title: "The Movie",
+        height: 1080,
+        duration: 91.5,
+        pageTitle: "The Movie (2024) - Example Site",
+      },
+    }),
+  );
+  assert.ok(richer);
+  let inbox = receiveSniffCandidate(createSniffInbox(), parsed);
+  inbox = receiveSniffCandidate(inbox, richer);
+  assert.equal(inbox.candidates.length, 1);
+  assert.equal(inbox.candidates[0].meta.title, "The Movie");
+  assert.equal(inbox.candidates[0].meta.height, 1080);
+  assert.equal(inbox.candidates[0].meta.duration, 91.5);
+  assert.equal(inbox.candidates[0].meta.poster, parsed.meta.poster);
+
+  assert.equal(
+    toSniffCandidate({ ...candidate(), meta: "not-a-record" }),
+    null,
+  );
 });
 
 test("one page retains distinct media but deduplicates URLs and caps suggestions", () => {

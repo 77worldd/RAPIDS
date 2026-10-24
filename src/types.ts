@@ -1,29 +1,13 @@
 export type CoreViewId =
-  | "all"
-  | "downloading"
-  | "queued"
-  | "completed"
-  | "paused"
-  | "failed";
+  "all" | "downloading" | "queued" | "completed" | "paused" | "failed";
 
 export type TagId =
-  | "movies"
-  | "music"
-  | "images"
-  | "documents"
-  | "archives"
-  | "apps"
-  | "other";
+  "movies" | "music" | "images" | "documents" | "archives" | "apps" | "other";
 
 export type ViewId = CoreViewId | TagId;
 
 export type TaskStatus =
-  | "queued"
-  | "scheduled"
-  | "downloading"
-  | "paused"
-  | "completed"
-  | "error";
+  "queued" | "scheduled" | "downloading" | "paused" | "completed" | "error";
 
 /** The host's TaskView, with no invented client-only fields. */
 export interface Task {
@@ -66,12 +50,32 @@ export type StoreStatus = "loading" | "ready" | "failed";
 
 export type SniffSource = "video" | "videoSource" | "link" | "navigation";
 
+/** Page-level metadata captured from the inspector DOM. Values are already
+ * bounded and sanitized at the native boundary. */
+export interface SniffPageMetadata {
+  readonly pageTitle: string | null;
+  readonly siteName: string | null;
+  readonly ogTitle: string | null;
+  readonly twitterTitle: string | null;
+  readonly ogImage: string | null;
+  readonly twitterImage: string | null;
+}
+
+/** Per-candidate DOM metadata. Null means the page did not expose a value. */
+export interface SniffMetadata extends SniffPageMetadata {
+  readonly title: string | null;
+  readonly poster: string | null;
+  readonly height: number | null;
+  readonly duration: number | null;
+}
+
 /** An in-memory suggestion from the inspector, not a download task. */
 export interface SniffCandidate {
   readonly session: number;
   readonly pageUrl: string;
   readonly url: string;
   readonly source: SniffSource;
+  readonly meta: SniffMetadata;
 }
 
 export interface AppInfo {

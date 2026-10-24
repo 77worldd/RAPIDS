@@ -1,6 +1,14 @@
-import type { SniffCandidate } from "../types";
+import type {
+  SniffCandidate,
+  SniffMetadata,
+  SniffPageMetadata,
+} from "../types";
 
 const MAX_URL_LENGTH = 2048;
+const MAX_TEXT_LENGTH = 300;
+const MAX_SITE_LENGTH = 120;
+const MAX_HEIGHT = 8192;
+const MAX_DURATION_SECONDS = 604_800;
 const MAX_CANDIDATES = 16;
 const MEDIA_EXTENSIONS = [".mp4", ".webm", ".m4v", ".mov", ".mkv"];
 
@@ -51,13 +59,77 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function textValue(value: unknown, limit: number): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text === "") return null;
+  return text.length > limit ? text.slice(0, limit).trim() : text;
+}
+
+function imageValue(value: unknown): string | null {
+  const url = httpUrl(value, false);
+  if (url === null) return null;
+  url.hash = "";
+  return url.href;
+}
+
+function emptyMeta(): SniffMetadata {
+  return {
+    title: null,
+    poster: null,
+    height: null,
+    duration: null,
+    pageTitle: null,
+    siteName: null,
+    ogTitle: null,
+    twitterTitle: null,
+    ogImage: null,
+    twitterImage: null,
+  };
+}
+
+/** Normalize metadata without trusting the native event: bad optional fields
+ * become null, and oversized text is clipped to the same limits as Rust. */
+function toSniffMetadata(value: unknown): SniffMetadata | null {
+  if (!isRecord(value)) return null;
+  const height = value.height;
+  const duration = value.duration;
+  return {
+    title: textValue(value.title, MAX_TEXT_LENGTH),
+    poster: imageValue(value.poster),
+    height:
+      typeof height === "number" &&
+      Number.isSafeInteger(height) &&
+      height >= 1 &&
+      height <= MAX_HEIGHT
+        ? height
+        : null,
+    duration:
+      typeof duration === "number" &&
+      Number.isFinite(duration) &&
+      duration > 0 &&
+      duration <= MAX_DURATION_SECONDS
+        ? duration
+        : null,
+    pageTitle: textValue(value.pageTitle, MAX_TEXT_LENGTH),
+    siteName: textValue(value.siteName, MAX_SITE_LENGTH),
+    ogTitle: textValue(value.ogTitle, MAX_TEXT_LENGTH),
+    twitterTitle: textValue(value.twitterTitle, MAX_TEXT_LENGTH),
+    ogImage: imageValue(value.ogImage),
+    twitterImage: imageValue(value.twitterImage),
+  };
+}
+
 /** Parse the native event at the IPC boundary without retaining extra fields. */
 export function toSniffCandidate(value: unknown): SniffCandidate | null {
   if (!isRecord(value)) return null;
   const fields = ["session", "pageUrl", "url", "source"];
+  const hasMeta = Object.prototype.hasOwnProperty.call(value, "meta");
   if (
-    Object.keys(value).length !== fields.length ||
-    !fields.every((field) => Object.prototype.hasOwnProperty.call(value, field))
+    !fields.every((field) =>
+      Object.prototype.hasOwnProperty.call(value, field),
+    ) ||
+    Object.keys(value).length !== (hasMeta ? fields.length + 1 : fields.length)
   ) {
     return null;
   }
@@ -89,7 +161,35 @@ export function toSniffCandidate(value: unknown): SniffCandidate | null {
     return null;
   }
 
-  return { session, pageUrl: page.href, url: media.href, source };
+  const meta = hasMeta ? toSniffMetadata(value.meta) : emptyMeta();
+  if (meta === null) return null;
+
+  return { session, pageUrl: page.href, url: media.href, source, meta };
+}
+
+/** Prefer the newest non-null value; metadata arrives with each candidate but
+ * a later scan can fill gaps from a video that has finished loading. */
+export function mergeSniffMetadata(
+  current: SniffMetadata,
+  incoming: SniffMetadata,
+): SniffMetadata {
+  const next: SniffMetadata = {
+    title: incoming.title ?? current.title,
+    poster: incoming.poster ?? current.poster,
+    height: incoming.height ?? current.height,
+    duration: incoming.duration ?? current.duration,
+    pageTitle: incoming.pageTitle ?? current.pageTitle,
+    siteName: incoming.siteName ?? current.siteName,
+    ogTitle: incoming.ogTitle ?? current.ogTitle,
+    twitterTitle: incoming.twitterTitle ?? current.twitterTitle,
+    ogImage: incoming.ogImage ?? current.ogImage,
+    twitterImage: incoming.twitterImage ?? current.twitterImage,
+  };
+  return (Object.keys(next) as (keyof SniffMetadata)[]).every(
+    (key) => next[key] === current[key],
+  )
+    ? current
+    : next;
 }
 
 /** Ephemeral candidate list for one inspector session and page. */
@@ -121,14 +221,45 @@ export function receiveSniffCandidate(
       dismissed: false,
     };
   }
-  if (
-    current.dismissed ||
-    current.candidates.length >= MAX_CANDIDATES ||
-    current.candidates.some((item) => item.url === candidate.url)
-  ) {
-    return current;
+  if (current.dismissed) return current;
+  const existing = current.candidates.find(
+    (item) => item.url === candidate.url,
+  );
+  if (existing !== undefined) {
+    const meta = mergeSniffMetadata(existing.meta, candidate.meta);
+    if (meta === existing.meta) return current;
+    return {
+      ...current,
+      candidates: current.candidates.map((item) =>
+        item === existing ? { ...item, meta } : item,
+      ),
+    };
   }
+  if (current.candidates.length >= MAX_CANDIDATES) return current;
   return { ...current, candidates: [...current.candidates, candidate] };
+}
+
+/** Page fields are repeated on every event; the first non-null value wins. */
+export function sniffPageMetadata(
+  candidates: readonly SniffCandidate[],
+): SniffPageMetadata {
+  const page = {
+    pageTitle: null as string | null,
+    siteName: null as string | null,
+    ogTitle: null as string | null,
+    twitterTitle: null as string | null,
+    ogImage: null as string | null,
+    twitterImage: null as string | null,
+  };
+  for (const candidate of candidates) {
+    page.pageTitle ??= candidate.meta.pageTitle;
+    page.siteName ??= candidate.meta.siteName;
+    page.ogTitle ??= candidate.meta.ogTitle;
+    page.twitterTitle ??= candidate.meta.twitterTitle;
+    page.ogImage ??= candidate.meta.ogImage;
+    page.twitterImage ??= candidate.meta.twitterImage;
+  }
+  return page;
 }
 
 /** Keep this navigation muted; another page or session starts a fresh inbox. */

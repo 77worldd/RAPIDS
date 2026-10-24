@@ -209,7 +209,13 @@ export function InspectPageButton() {
             pageUrl={inbox.pageUrl}
             candidates={inbox.candidates}
             onDismiss={() => setInbox((current) => dismissSniffInbox(current))}
-            onSelect={(candidate) => {
+            onSelect={(selection) => {
+              const candidate = inbox.candidates.find(
+                (item) =>
+                  item.url === selection.url &&
+                  item.source === selection.source,
+              );
+              if (candidate === undefined) return;
               const choice = selectSniffCandidate(inbox, candidate);
               if (choice.url !== null) {
                 setInbox(choice.inbox);

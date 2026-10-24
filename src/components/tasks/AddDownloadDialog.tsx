@@ -40,6 +40,7 @@ import {
   fetchDownloadDefaultDir,
   getSettings,
   listSchedules,
+  openSniffInspector,
 } from "../../lib/ipc";
 import { pickFolder, readClipboardText } from "../../lib/native";
 import {
@@ -47,6 +48,7 @@ import {
   readCategoryDirs,
   type CategoryDirs,
 } from "../../lib/preferences";
+import { toInspectorUrl } from "../../lib/sniff";
 import { cn } from "../../lib/cn";
 import {
   useRefreshTasks,
@@ -181,6 +183,7 @@ export function AddDownloadDialog({
   const [submitting, setSubmitting] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const [pasting, setPasting] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -271,6 +274,26 @@ export function AddDownloadDialog({
       return;
     }
     onClose();
+  }
+
+  async function inspectPage(): Promise<void> {
+    if (inspecting) return;
+    let url: string;
+    try {
+      url = toInspectorUrl(draft.url);
+    } catch (cause) {
+      setError(describeError(cause));
+      return;
+    }
+    setInspecting(true);
+    setError(null);
+    try {
+      await openSniffInspector(url);
+      onClose();
+    } catch (cause) {
+      setInspecting(false);
+      setError(describeError(cause));
+    }
   }
 
   async function browse(): Promise<void> {
@@ -492,6 +515,15 @@ export function AddDownloadDialog({
                 Paste or drop a link. RAPIDS saves the response exactly as the
                 server sends it.
               </p>
+              <button
+                type="button"
+                onClick={() => void inspectPage()}
+                disabled={draft.url.trim() === "" || inspecting}
+                className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-line bg-elevated/60 px-2.5 text-[11px] font-medium text-ink-soft transition-colors duration-150 hover:border-line-strong hover:bg-elevated hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/45 disabled:pointer-events-none disabled:opacity-45"
+              >
+                <Globe2 size={12} strokeWidth={1.8} />
+                {inspecting ? "Opening inspector…" : "Find media on this page"}
+              </button>
             </section>
 
             <section
