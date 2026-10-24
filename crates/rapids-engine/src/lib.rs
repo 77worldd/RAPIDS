@@ -2,7 +2,8 @@
 //!
 //! Segmented HTTP/HTTPS downloads with kill-safe resume (part files plus a
 //! sidecar manifest), retry with exponential backoff, pause/resume/cancel
-//! control, dynamic connection scaling, and optional SHA-256 verification.
+//! control, dynamic connection scaling, optional SHA-256 verification, and
+//! HLS recordings (m3u8 playlists, AES-128 segments).
 //!
 //! The crate is UI-agnostic: the desktop host and the command line driver
 //! both consume it through the `spawn_download` entry point and a typed
@@ -12,12 +13,14 @@ mod coordinator;
 mod hash;
 mod http;
 
+pub mod aes;
 pub mod base64;
 pub mod config;
 pub mod connections;
 pub mod error;
 pub mod events;
 pub mod headers;
+pub mod m3u8;
 pub mod manifest;
 pub mod rate;
 pub mod segmenter;
