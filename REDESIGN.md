@@ -86,7 +86,7 @@ The technical filename is always retained and shown as secondary text.
 
 - `video[poster]` when present and HTTP(S).
 - `og:image` / `twitter:image` when it resolves to HTTP(S).
-- Otherwise a token-driven monochrome placeholder (no stock art).
+- Otherwise a token-driven monochrome fallback (no stock art).
 - No canvas frame capture in this phase: cross-origin video taints the canvas and silently returns blank images. A later phase can add it behind a CORS check.
 
 ### 3.4 Monochrome system
@@ -188,8 +188,8 @@ Out of scope for this pass: HLS/DASH manifest parsing, ffprobe/container inspect
 ### Previews and metadata
 
 - **AC-14** An item renders `video[poster]` as its thumbnail when available.
-- **AC-15** With no poster, `og:image` is used; with neither, a monochrome placeholder renders.
-- **AC-16** A broken thumbnail URL falls back to the placeholder without a broken-image icon.
+- **AC-15** With no poster, `og:image` is used; with neither, a monochrome fallback renders.
+- **AC-16** A broken thumbnail URL falls back to the monochrome fallback without a broken-image icon.
 - **AC-17** Resolution/format/size/duration are shown only when known; no fabricated values.
 - **AC-18** Hover (extension) or selection (desktop) reveals title, host, variant count, and metadata.
 

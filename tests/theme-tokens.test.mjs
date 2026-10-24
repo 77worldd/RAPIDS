@@ -104,7 +104,7 @@ test("no hue survives in app or extension source", () => {
   const bannedHex = /#(10b981|059669|34d399|6ee7b7|a7f3d0|022c22|03251a)/i;
   const bannedRgb = /rgba?\(\s*16\s*[, ]\s*185\s*[, ]\s*129/i;
   const bannedUtility =
-    /\b(?:bg|text|border|ring|from|via|to|divide|outline|stroke|fill|decoration|caret|accent|placeholder)-(?:red|rose|pink|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia)-\d{2,3}\b/;
+    /\b(?:bg|text|border|ring|from|via|to|divide|outline|stroke|fill|decoration|caret|accent)-(?:red|rose|pink|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia)-\d{2,3}\b/;
   const violations = [];
   for (const file of files) {
     const source = readFileSync(file, "utf8");

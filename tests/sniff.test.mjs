@@ -153,6 +153,41 @@ test("inspector metadata is bounded and duplicate URLs gain missing values", () 
   );
 });
 
+test("page metadata prefers the first non-null value across candidates", () => {
+  const first = toSniffCandidate(
+    candidate({
+      meta: {
+        ...EMPTY_META,
+        pageTitle: "The Movie (2024) - Example Site",
+        ogTitle: null,
+        ogImage: "http://127.0.0.1:53001/poster-wide.png",
+      },
+    }),
+  );
+  const second = toSniffCandidate(
+    candidate({
+      url: TRAILER,
+      meta: {
+        ...EMPTY_META,
+        pageTitle: "A different title",
+        ogTitle: "The Movie (2024)",
+        twitterTitle: "The Movie (2024)",
+        twitterImage: "http://127.0.0.1:53001/twitter.png",
+      },
+    }),
+  );
+  assert.ok(first);
+  assert.ok(second);
+  assert.deepEqual(sniffPageMetadata([first, second]), {
+    pageTitle: "The Movie (2024) - Example Site",
+    siteName: null,
+    ogTitle: "The Movie (2024)",
+    twitterTitle: "The Movie (2024)",
+    ogImage: "http://127.0.0.1:53001/poster-wide.png",
+    twitterImage: "http://127.0.0.1:53001/twitter.png",
+  });
+});
+
 test("one page retains distinct media but deduplicates URLs and caps suggestions", () => {
   const first = toSniffCandidate(candidate());
   const linked = toSniffCandidate(candidate({ url: TRAILER, source: "link" }));

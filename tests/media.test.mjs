@@ -211,7 +211,7 @@ test("quality labels never become the item title", () => {
   assert.equal(items[0].title, "The Movie");
 });
 
-test("poster, Open Graph image, then placeholder", () => {
+test("poster, Open Graph image, then monochrome fallback", () => {
   const poster = build([candidate("movie_1080.mp4")], {
     poster: "https://cdn.example.com/poster.jpg",
     ogImage: "https://cdn.example.com/og.jpg",
