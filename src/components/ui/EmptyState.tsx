@@ -27,8 +27,8 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div className="flex h-full min-h-64 flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="relative mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-line bg-panel text-emerald-300 shadow-[0_18px_40px_-26px_rgba(16,185,129,0.55)]">
-        <div className="absolute inset-2 rounded-xl border border-emerald-400/10" />
+      <div className="relative mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-line bg-panel text-accent-bright shadow-[0_18px_40px_-26px_rgba(31,185,223,0.55)]">
+        <div className="absolute inset-2 rounded-xl border border-accent-bright/10" />
         {icon}
       </div>
       <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-100">

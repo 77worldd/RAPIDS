@@ -935,7 +935,7 @@ chrome.storage.onChanged.addListener(function (changes, area) {
 });
 
 void chrome.action
-  .setBadgeBackgroundColor({ color: "#059669" })
+  .setBadgeBackgroundColor({ color: "#1FB9DF" })
   .catch(function () {
     // Badge styling is cosmetic.
   });

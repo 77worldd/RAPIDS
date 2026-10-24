@@ -335,7 +335,7 @@ export function DialogWindow({
           className="flex min-h-14 shrink-0 cursor-grab items-center gap-3 border-b border-line/80 px-4 py-3 active:cursor-grabbing"
         >
           {icon !== undefined && (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent-bright">
               {icon}
             </div>
           )}

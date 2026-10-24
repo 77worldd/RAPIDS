@@ -16,9 +16,9 @@ const CATEGORY_TONE: Record<TagId, string> = {
   movies: "bg-violet-500/10 text-violet-300",
   music: "bg-sky-500/10 text-sky-300",
   images: "bg-rose-500/10 text-rose-300",
-  documents: "bg-amber-500/10 text-amber-300",
-  archives: "bg-orange-500/10 text-orange-300",
-  apps: "bg-emerald-500/10 text-emerald-300",
+  documents: "bg-accent-amber/10 text-accent-amber",
+  archives: "bg-accent-warm/10 text-accent-warm",
+  apps: "bg-accent/10 text-accent-bright",
   other: "bg-zinc-500/10 text-zinc-300",
 };
 
@@ -96,9 +96,9 @@ function RowAction({
       aria-label={`${label} ${task.fileName}`}
       title={label}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/65",
+        "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/65",
         task.status === "completed"
-          ? "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-300"
+          ? "text-zinc-500 hover:bg-accent/10 hover:text-accent-bright"
           : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100",
       )}
     >
@@ -151,7 +151,7 @@ export function TaskRow({
       className={cn(
         "group flex cursor-default items-center gap-2 border-b border-line/55 px-3 py-2.5 transition-colors duration-150 min-[1180px]:gap-3 min-[1180px]:px-4",
         selected
-          ? "bg-emerald-500/[0.045]"
+          ? "bg-accent/[0.045]"
           : task.status === "error"
             ? "bg-red-500/[0.022] hover:bg-red-500/[0.04]"
             : "hover:bg-white/[0.025]",
@@ -164,7 +164,7 @@ export function TaskRow({
           onChange={() => onToggle(task.id)}
           onClick={(event) => event.stopPropagation()}
           aria-label={`Select ${task.fileName}`}
-          className="h-3.5 w-3.5 cursor-pointer rounded border-zinc-600 bg-transparent accent-emerald-500"
+          className="h-3.5 w-3.5 cursor-pointer rounded border-zinc-600 bg-transparent accent-accent"
         />
       </div>
 
@@ -241,11 +241,11 @@ export function TaskRow({
                 ? "bg-red-400/80"
                 : task.status === "paused"
                   ? "bg-amber-400/80"
-                  : task.status === "completed"
-                    ? "bg-teal-400"
+                    : task.status === "completed"
+                      ? "bg-accent-deep"
                     : task.status === "queued" || task.status === "scheduled"
                       ? "bg-sky-400/70"
-                      : "bg-emerald-400",
+                      : "bg-accent-bright",
             )}
             style={unknownProgress ? undefined : { width: progressWidth(fraction) }}
           />

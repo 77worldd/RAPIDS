@@ -52,7 +52,7 @@ export function SidebarFooter({
         <span
           className={cn(
             "h-2 w-2 rounded-full",
-            queuePaused ? "bg-amber-400" : active > 0 ? "bg-emerald-400" : "bg-zinc-600",
+            queuePaused ? "bg-amber-400" : active > 0 ? "bg-accent-bright" : "bg-zinc-600",
           )}
         />
       </div>
@@ -69,7 +69,7 @@ export function SidebarFooter({
               queuePaused
                 ? "bg-amber-400"
                 : active > 0
-                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+                  ? "bg-accent-bright shadow-[0_0_8px_rgba(98,228,244,0.85)]"
                   : "bg-zinc-600",
             )}
           />

@@ -44,7 +44,7 @@ export function TaskList({
               checked={allSelected}
               onChange={() => onToggleAll(!allSelected)}
               aria-label={allSelected ? "Clear selection" : "Select all downloads"}
-              className="h-3.5 w-3.5 cursor-pointer rounded border-zinc-600 bg-transparent accent-emerald-500"
+              className="h-3.5 w-3.5 cursor-pointer rounded border-zinc-600 bg-transparent accent-accent"
             />
           </div>
           <span role="columnheader" className="min-w-0 flex-1">

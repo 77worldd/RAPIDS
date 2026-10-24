@@ -57,7 +57,7 @@ export function MediaCandidatePopup({
                 size={15}
                 strokeWidth={1.75}
                 aria-hidden="true"
-                className="shrink-0 text-emerald-400"
+                className="shrink-0 text-accent-bright"
               />
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] text-zinc-400">

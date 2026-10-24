@@ -48,7 +48,7 @@ export function Sidebar() {
       initial={false}
       animate={{ width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
       transition={TRANSITION}
-      className="relative z-10 flex h-full shrink-0 flex-col overflow-hidden border-r border-line/80 bg-[#0c0e10]"
+      className="relative z-10 flex h-full shrink-0 flex-col overflow-hidden border-r border-line/80 bg-[#0c1622]"
     >
       <div
         className={cn(

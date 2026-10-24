@@ -17,9 +17,9 @@ export function Toggle({ checked, onChange, label, disabled = false }: TogglePro
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:opacity-40",
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/45 focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:opacity-40",
         checked
-          ? "border-emerald-400/40 bg-emerald-500"
+          ? "border-accent-bright/40 bg-accent"
           : "border-line bg-zinc-700",
       )}
     >

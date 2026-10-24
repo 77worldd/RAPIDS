@@ -17,8 +17,8 @@ const PRESENTATION: Record<
   },
   downloading: {
     label: "Downloading",
-    color: "bg-emerald-500/10 text-emerald-300",
-    dot: "bg-emerald-400",
+    color: "bg-accent/10 text-accent-bright",
+    dot: "bg-accent-bright",
   },
   paused: {
     label: "Paused",
@@ -27,8 +27,8 @@ const PRESENTATION: Record<
   },
   completed: {
     label: "Completed",
-    color: "bg-teal-500/10 text-teal-300",
-    dot: "bg-teal-400",
+    color: "bg-accent-deep/20 text-accent-bright",
+    dot: "bg-accent-deep",
   },
   error: {
     label: "Failed",

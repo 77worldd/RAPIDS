@@ -58,7 +58,7 @@ import { Button } from "../ui/Button";
 import { DialogWindow } from "../ui/DialogWindow";
 
 const FIELD =
-  "h-10 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[13px] text-zinc-100 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-emerald-500/60 focus:bg-canvas focus:ring-2 focus:ring-emerald-500/15";
+  "h-10 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[13px] text-zinc-100 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-accent/60 focus:bg-canvas focus:ring-2 focus:ring-accent/15";
 const LABEL = "mb-1.5 block text-[12px] font-medium text-zinc-300";
 const HELP = "mt-1.5 text-[11px] leading-relaxed text-zinc-500";
 
@@ -90,7 +90,7 @@ function kindTone(info: UrlFileInfo): string {
   ) {
     return "bg-amber-500/10 text-amber-300";
   }
-  return "bg-emerald-500/10 text-emerald-300";
+  return "bg-accent/10 text-accent-bright";
 }
 
 function taskStatusLabel(status: string): string {
@@ -433,7 +433,7 @@ export function AddDownloadDialog({
         aria-busy={submitting}
         className={cn(
           "flex min-h-0 flex-1 flex-col",
-          dragging && "ring-2 ring-inset ring-emerald-400/70",
+          dragging && "ring-2 ring-inset ring-accent-bright/70",
         )}
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -482,7 +482,7 @@ export function AddDownloadDialog({
                   type="button"
                   onClick={() => void paste()}
                   disabled={pasting}
-                  className="absolute right-1 top-1 inline-flex h-8 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/70 disabled:opacity-50"
+                  className="absolute right-1 top-1 inline-flex h-8 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/70 disabled:opacity-50"
                 >
                   <ClipboardPaste size={13} strokeWidth={1.8} />
                   {pasting ? "Reading" : "Paste"}
@@ -530,7 +530,7 @@ export function AddDownloadDialog({
               ) : (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-panel text-emerald-300">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-panel text-accent-bright">
                       <CategoryIcon size={18} strokeWidth={1.7} />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -694,13 +694,13 @@ export function AddDownloadDialog({
                         category: suggestedCategory(info),
                       }));
                     }}
-                    className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-emerald-400/80 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
+                    className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-accent-bright/80 transition-colors hover:bg-accent/10 hover:text-accent-bright focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
                   >
                     <Sparkles size={12} strokeWidth={1.8} />
                     Use auto
                   </button>
                 ) : (
-                  <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-emerald-400/80">
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-accent-bright/80">
                     <Sparkles size={12} strokeWidth={1.8} />
                     Auto
                   </span>
@@ -722,9 +722,9 @@ export function AddDownloadDialog({
                       aria-checked={selected}
                       onClick={() => chooseCategory(entry.id)}
                       className={cn(
-                        "group flex min-h-[3.5rem] items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/45",
+                        "group flex min-h-[3.5rem] items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/45",
                         selected
-                          ? "border-emerald-500/50 bg-emerald-500/[0.08] text-zinc-100"
+                          ? "border-accent/50 bg-accent/[0.08] text-zinc-100"
                           : "border-line bg-panel/40 text-zinc-400 hover:border-zinc-600 hover:bg-white/[0.03] hover:text-zinc-200",
                       )}
                     >
@@ -732,7 +732,7 @@ export function AddDownloadDialog({
                         className={cn(
                           "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
                           selected
-                            ? "bg-emerald-500/15 text-emerald-300"
+                            ? "bg-accent/15 text-accent-bright"
                             : "bg-white/[0.04] text-zinc-500 group-hover:text-zinc-300",
                         )}
                       >
@@ -757,7 +757,7 @@ export function AddDownloadDialog({
                 type="button"
                 aria-expanded={advancedOpen}
                 onClick={() => setAdvancedOpen((open) => !open)}
-                className="flex w-full items-center gap-2 bg-panel/30 px-3.5 py-3 text-left transition-colors hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40"
+                className="flex w-full items-center gap-2 bg-panel/30 px-3.5 py-3 text-left transition-colors hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
               >
                 <ShieldCheck
                   size={14}

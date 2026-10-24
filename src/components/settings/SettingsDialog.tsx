@@ -41,7 +41,7 @@ import { IconButton } from "../ui/IconButton";
 import { Toggle } from "../ui/Toggle";
 
 const FIELD =
-  "h-9 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[12.5px] text-zinc-100 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-emerald-500/60 focus:bg-canvas focus:ring-2 focus:ring-emerald-500/15";
+  "h-9 w-full rounded-lg border border-line bg-canvas/55 px-3 text-[12.5px] text-zinc-100 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-accent/60 focus:bg-canvas focus:ring-2 focus:ring-accent/15";
 const LABEL = "mb-1.5 block text-[12px] font-medium text-zinc-300";
 const HELP = "mt-1.5 text-[11px] leading-relaxed text-zinc-500";
 
@@ -473,9 +473,9 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
                   onClick={() => setTab(entry.id)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex h-8 items-center gap-2 rounded-md px-2.5 text-left text-[12px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60",
+                    "flex h-8 items-center gap-2 rounded-md px-2.5 text-left text-[12px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
                     active
-                      ? "bg-emerald-500/10 text-emerald-300"
+                      ? "bg-accent/10 text-accent-bright"
                       : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200",
                   )}
                 >
@@ -491,7 +491,7 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
               <TabIcon
                 size={15}
                 strokeWidth={1.8}
-                className="text-emerald-400"
+                className="text-accent-bright"
               />
               <h3 className="text-[13px] font-semibold text-zinc-100">
                 {TABS.find((entry) => entry.id === tab)?.label}
@@ -579,7 +579,7 @@ export function SettingsDialog({ onClose }: { readonly onClose: () => void }) {
         <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-canvas/25 px-4 py-3">
           <p className="min-w-0 flex-1 text-[11px] text-zinc-500">
             {saved !== null ? (
-              <span className="inline-flex items-center gap-1.5 text-emerald-300">
+              <span className="inline-flex items-center gap-1.5 text-accent-bright">
                 <Check size={12} strokeWidth={2} /> {saved}
               </span>
             ) : dirty ? (
@@ -806,7 +806,7 @@ function FoldersPanel({
                   onChange={(event) =>
                     onChange(category.id, event.target.value)
                   }
-                  className="mt-1 h-7 w-full rounded-md border border-line bg-canvas/50 px-2 text-[11px] text-zinc-200 outline-none transition-colors focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20"
+                  className="mt-1 h-7 w-full rounded-md border border-line bg-canvas/50 px-2 text-[11px] text-zinc-200 outline-none transition-colors focus:border-accent/60 focus:ring-1 focus:ring-accent/20"
                 />
               </div>
               <Button
@@ -1041,9 +1041,9 @@ function SchedulesPanel({
                       aria-pressed={selected}
                       onClick={() => onWeekdays(newWeekdays ^ day.bit)}
                       className={cn(
-                        "h-8 min-w-11 rounded-md border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                        "h-8 min-w-11 rounded-md border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
                         selected
-                          ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
+                          ? "border-accent/50 bg-accent/10 text-accent-bright"
                           : "border-line bg-canvas/45 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200",
                       )}
                     >

@@ -313,7 +313,7 @@ export function TasksView() {
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value as SortKey)}
-              className="h-7 appearance-none rounded-md border border-line bg-canvas/55 pl-7 pr-7 text-[11px] text-zinc-300 outline-none transition-colors focus:border-emerald-500/55 focus:ring-1 focus:ring-emerald-500/20"
+              className="h-7 appearance-none rounded-md border border-line bg-canvas/55 pl-7 pr-7 text-[11px] text-zinc-300 outline-none transition-colors focus:border-accent/55 focus:ring-1 focus:ring-accent/20"
             >
               {SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -352,8 +352,8 @@ export function TasksView() {
       )}
 
       {selectedCount > 0 && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-emerald-500/20 bg-emerald-500/[0.055] px-4 py-2">
-          <span className="text-[11px] font-medium text-emerald-200">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-accent/20 bg-accent/[0.055] px-4 py-2">
+          <span className="text-[11px] font-medium text-accent-bright">
             {selectedCount} selected
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-1.5">

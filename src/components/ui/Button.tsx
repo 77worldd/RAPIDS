@@ -12,7 +12,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-emerald-500 text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:bg-emerald-400 active:bg-emerald-500",
+    "bg-accent text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] hover:bg-accent-bright active:bg-accent",
   secondary:
     "border border-line bg-elevated/70 text-zinc-200 hover:border-zinc-600 hover:bg-elevated hover:text-zinc-50",
   ghost: "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100",
@@ -37,7 +37,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:pointer-events-none disabled:opacity-45",
+        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/45 focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:pointer-events-none disabled:opacity-45",
         VARIANTS[variant],
         SIZES[size],
         className,
