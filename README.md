@@ -1,4 +1,5 @@
-# RAPIDS
+<p align="center"><img src="brand/tauri-icons/128x128.png" width="96" alt="RAPIDS logo" /></p>
+<h1 align="center">RAPIDS</h1>
 
 RAPIDS is a Windows desktop HTTP(S) download manager with a persistent queue,
 timed start windows, and per-task and app-wide transfer limits.

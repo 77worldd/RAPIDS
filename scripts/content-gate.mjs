@@ -20,6 +20,7 @@ const EXCLUDED_DIRS = new Set([
   "target",
   "gen",
   ".git",
+  "brand", // imported artwork + designer's brief, not authored source
 ]);
 const TEXT_EXTENSIONS = new Set([
   ".ts",
