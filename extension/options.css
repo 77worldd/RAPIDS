@@ -1,15 +1,16 @@
 :root {
   color-scheme: dark;
-  --canvas: #090b0c;
-  --panel: #101314;
-  --panel-soft: #141819;
-  --line: #262c2d;
-  --line-soft: #1d2223;
-  --text: #e8ebea;
-  --muted: #9aa19f;
-  --faint: #6b7371;
-  --emerald: #34d399;
-  --emerald-deep: #059669;
+  --canvas: #0b1017;
+  --panel: #101823;
+  --panel-soft: #15202f;
+  --line: #223449;
+  --line-soft: #1a2838;
+  --text: #dce7f0;
+  --muted: #8a94a3;
+  --faint: #6d7c8e;
+  --accent: #1fb9df;
+  --accent-bright: #62e4f4;
+  --accent-deep: #0c7ca4;
   --red: #f87171;
 }
 
@@ -27,7 +28,7 @@ body {
   background:
     radial-gradient(
       70% 55% at 50% 0%,
-      rgba(16, 185, 129, 0.08),
+      rgba(31, 185, 223, 0.08),
       transparent 70%
     ),
     var(--canvas);
@@ -76,9 +77,9 @@ code {
 .mark {
   width: 38px;
   height: 38px;
-  border: 1px solid rgba(52, 211, 153, 0.28);
+  border: 1px solid rgba(31, 185, 223, 0.3);
   border-radius: 9px;
-  background: #0d1512;
+  background: #0c1926;
 }
 
 .eyebrow {
@@ -87,7 +88,7 @@ code {
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--emerald);
+  color: var(--accent-bright);
 }
 
 h1 {
@@ -164,10 +165,10 @@ main {
 .primary {
   height: 32px;
   padding: 0 13px;
-  border: 1px solid rgba(52, 211, 153, 0.42);
+  border: 1px solid rgba(31, 185, 223, 0.45);
   border-radius: 6px;
-  background: var(--emerald-deep);
-  color: #03251a;
+  background: var(--accent-deep);
+  color: #04222c;
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
@@ -177,8 +178,8 @@ main {
 }
 
 .primary:hover:not(:disabled) {
-  border-color: rgba(110, 231, 183, 0.7);
-  background: #10b981;
+  border-color: rgba(98, 228, 244, 0.7);
+  background: #1fb9df;
 }
 
 .primary:disabled {
@@ -187,7 +188,7 @@ main {
 }
 
 .primary:focus-visible {
-  outline: 2px solid rgba(52, 211, 153, 0.55);
+  outline: 2px solid rgba(31, 185, 223, 0.55);
   outline-offset: 2px;
 }
 
@@ -203,7 +204,7 @@ main {
   min-height: 16px;
   margin-top: 10px;
   font-size: 11px;
-  color: var(--emerald);
+  color: var(--accent-bright);
 }
 
 .status:empty {
@@ -271,8 +272,8 @@ main {
 }
 
 .number-field input:focus {
-  border-color: rgba(52, 211, 153, 0.55);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.12);
+  border-color: rgba(31, 185, 223, 0.55);
+  box-shadow: 0 0 0 2px rgba(31, 185, 223, 0.12);
 }
 
 .switch {
@@ -314,8 +315,8 @@ main {
 }
 
 .switch input:checked + .track {
-  border-color: rgba(52, 211, 153, 0.45);
-  background: var(--emerald-deep);
+  border-color: rgba(31, 185, 223, 0.45);
+  background: var(--accent-deep);
 }
 
 .switch input:checked + .track::after {
@@ -324,7 +325,7 @@ main {
 }
 
 .switch input:focus-visible + .track {
-  outline: 2px solid rgba(52, 211, 153, 0.5);
+  outline: 2px solid rgba(31, 185, 223, 0.5);
   outline-offset: 2px;
 }
 
@@ -356,7 +357,7 @@ main {
 }
 
 .points li::marker {
-  color: var(--emerald);
+  color: var(--accent-bright);
 }
 
 footer {

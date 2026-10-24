@@ -100,7 +100,7 @@ export function TaskActionMenu({ task, actions }: TaskActionMenuProps) {
         aria-haspopup="menu"
         aria-expanded={position !== null}
         onClick={open}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/65"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/65"
       >
         <svg
           width="15"
@@ -253,7 +253,7 @@ function MenuItem({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11.5px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60",
+        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11.5px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
         danger
           ? "text-red-300 hover:bg-red-500/10 hover:text-red-200"
           : "text-zinc-300 hover:bg-white/[0.055] hover:text-zinc-100",

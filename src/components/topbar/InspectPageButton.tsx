@@ -113,7 +113,7 @@ function InspectUrlDialog({ onOpen, onClose }: InspectUrlDialogProps) {
                 setError(null);
               }}
               aria-required="true"
-              className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-[13px] text-zinc-100 outline-none transition-colors duration-150 focus:border-emerald-500"
+              className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-[13px] text-zinc-100 outline-none transition-colors duration-150 focus:border-accent"
             />
           </div>
           {error !== null && (

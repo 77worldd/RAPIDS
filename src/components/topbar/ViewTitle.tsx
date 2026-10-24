@@ -13,7 +13,7 @@ export function ViewTitle() {
   return (
     <div className="flex min-w-0 shrink-0 flex-col justify-center">
       <div className="flex min-w-0 items-baseline gap-2">
-        <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-zinc-100">
+        <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-high">
           {viewLabel(viewId)}
         </h1>
         <span

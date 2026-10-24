@@ -74,9 +74,9 @@ export function AppShell() {
       <ClipboardPrompt />
 
       {dragging && !isOpen && (
-        <div className="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/60 bg-emerald-500/[0.07] backdrop-blur-sm">
-          <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-emerald-400/25 bg-panel/95 px-8 py-7 text-center shadow-2xl">
-            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/12 text-emerald-300">
+        <div className="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent-bright/60 bg-accent/[0.07] backdrop-blur-sm">
+          <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-accent-bright/25 bg-panel/95 px-8 py-7 text-center shadow-2xl">
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/12 text-accent-bright">
               <ArrowDownToLine size={22} strokeWidth={1.8} />
             </span>
             <div>

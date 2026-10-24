@@ -58,11 +58,11 @@ export function ClipboardPrompt() {
       className="fixed bottom-4 right-4 z-40 w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-line bg-panel/95 shadow-[0_22px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur rapids-dialog-enter"
     >
       <div className="flex items-start gap-2.5 px-3.5 py-3">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-300">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent-bright">
           <ClipboardPaste size={15} strokeWidth={1.8} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.09em] text-emerald-400/80">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.09em] text-accent-bright/80">
             On the clipboard
           </p>
           <p className="mt-1 truncate text-[12.5px] font-medium text-zinc-100" title={info.fileName ?? url}>

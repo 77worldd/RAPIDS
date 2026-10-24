@@ -64,14 +64,14 @@ export function SearchBox() {
         }}
         aria-label="Search downloads"
         aria-keyshortcuts="/"
-        className="h-8 w-full rounded-lg border border-line bg-canvas/55 pl-8 pr-14 text-[12.5px] text-zinc-200 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-emerald-500/55 focus:bg-canvas focus:ring-2 focus:ring-emerald-500/15"
+        className="h-8 w-full rounded-lg border border-line bg-canvas/55 pl-8 pr-14 text-[12.5px] text-zinc-200 outline-none transition-[border-color,background-color,box-shadow] duration-150 ease-out focus:border-accent/55 focus:bg-canvas focus:ring-2 focus:ring-accent/15"
       />
       {query !== "" ? (
         <button
           type="button"
           onClick={clearSearch}
           aria-label="Clear search"
-          className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
+          className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
         >
           <X size={12} strokeWidth={2} />
         </button>
