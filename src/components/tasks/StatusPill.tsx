@@ -1,57 +1,58 @@
+import { CalendarClock, Check, Clock3, Loader2, Pause, X } from "lucide-react";
 import type { TaskStatus } from "../../types";
 import { cn } from "../../lib/cn";
 
 const PRESENTATION: Record<
   TaskStatus,
-  { label: string; color: string; dot: string }
+  { label: string; tone: string; icon: typeof Check; spin?: boolean }
 > = {
   queued: {
     label: "Queued",
-    color: "bg-sky-500/10 text-sky-300",
-    dot: "bg-sky-400",
+    tone: "bg-ink/[0.055] text-muted",
+    icon: Clock3,
   },
   scheduled: {
     label: "Scheduled",
-    color: "bg-violet-500/10 text-violet-300",
-    dot: "bg-violet-400",
+    tone: "bg-ink/[0.035] text-muted",
+    icon: CalendarClock,
   },
   downloading: {
     label: "Downloading",
-    color: "bg-emerald-500/10 text-emerald-300",
-    dot: "bg-emerald-400",
+    tone: "bg-ink/10 text-ink",
+    icon: Loader2,
+    spin: true,
   },
   paused: {
     label: "Paused",
-    color: "bg-amber-500/10 text-amber-300",
-    dot: "bg-amber-400",
+    tone: "bg-ink/[0.07] text-ink-soft",
+    icon: Pause,
   },
   completed: {
     label: "Completed",
-    color: "bg-teal-500/10 text-teal-300",
-    dot: "bg-teal-400",
+    tone: "bg-ink text-canvas",
+    icon: Check,
   },
   error: {
     label: "Failed",
-    color: "bg-red-500/10 text-red-300",
-    dot: "bg-red-400",
+    tone: "border border-ink/25 bg-transparent text-ink",
+    icon: X,
   },
 };
 
 export function StatusPill({ status }: { readonly status: TaskStatus }) {
-  const { label, color, dot } = PRESENTATION[status];
+  const { label, tone, icon: Icon, spin } = PRESENTATION[status];
   return (
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-[10.5px] font-medium leading-none",
-        color,
+        tone,
       )}
     >
-      <span
-        className={cn(
-          "h-1.5 w-1.5 rounded-full",
-          dot,
-          status === "downloading" && "animate-pulse",
-        )}
+      <Icon
+        size={11}
+        strokeWidth={2}
+        aria-hidden="true"
+        className={cn(spin && "animate-spin")}
       />
       {label}
     </span>

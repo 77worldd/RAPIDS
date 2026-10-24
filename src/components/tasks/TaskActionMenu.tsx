@@ -10,12 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
 import type { Task } from "../../types";
@@ -100,7 +95,7 @@ export function TaskActionMenu({ task, actions }: TaskActionMenuProps) {
         aria-haspopup="menu"
         aria-expanded={position !== null}
         onClick={open}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/65"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/65"
       >
         <svg
           width="15"
@@ -253,13 +248,13 @@ function MenuItem({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11.5px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60",
+        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11.5px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/60",
         danger
-          ? "text-red-300 hover:bg-red-500/10 hover:text-red-200"
-          : "text-zinc-300 hover:bg-white/[0.055] hover:text-zinc-100",
+          ? "text-ink hover:bg-ink/10 hover:text-ink"
+          : "text-ink-soft hover:bg-ink/[0.055] hover:text-ink",
       )}
     >
-      <span className={cn("shrink-0", danger ? "text-red-400" : "text-zinc-500")}>
+      <span className={cn("shrink-0", danger ? "text-ink-soft" : "text-muted")}>
         {icon}
       </span>
       {label}

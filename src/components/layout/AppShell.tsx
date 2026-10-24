@@ -9,8 +9,10 @@ import { TopBar } from "../topbar/TopBar";
 import { ClipboardPrompt } from "./ClipboardPrompt";
 
 function hasLinkPayload(event: DragEvent<HTMLDivElement>): boolean {
-  return Array.from(event.dataTransfer.types).includes("text/uri-list") ||
-    Array.from(event.dataTransfer.types).includes("text/plain");
+  return (
+    Array.from(event.dataTransfer.types).includes("text/uri-list") ||
+    Array.from(event.dataTransfer.types).includes("text/plain")
+  );
 }
 
 export function AppShell() {
@@ -74,17 +76,18 @@ export function AppShell() {
       <ClipboardPrompt />
 
       {dragging && !isOpen && (
-        <div className="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/60 bg-emerald-500/[0.07] backdrop-blur-sm">
-          <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-emerald-400/25 bg-panel/95 px-8 py-7 text-center shadow-2xl">
-            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/12 text-emerald-300">
+        <div className="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-ink/60 bg-ink/[0.07] backdrop-blur-sm">
+          <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-ink/25 bg-panel/95 px-8 py-7 text-center shadow-2xl">
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-ink/12 text-ink">
               <ArrowDownToLine size={22} strokeWidth={1.8} />
             </span>
             <div>
-              <p className="text-[14px] font-semibold text-zinc-100">
+              <p className="text-[14px] font-semibold text-ink">
                 Drop the link to add it
               </p>
-              <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-500">
-                RAPIDS will check the file name, type, and destination before queueing the transfer.
+              <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+                RAPIDS will check the file name, type, and destination before
+                queueing the transfer.
               </p>
             </div>
           </div>

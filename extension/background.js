@@ -1,5 +1,5 @@
 /* RAPIDS MV3 service worker: sniff, store, badge, menus, and handoff. */
-importScripts("handoff.js");
+importScripts("handoff.js", "media.js");
 
 var STORAGE_KEY = "rapids.candidates.v1";
 var OPTIONS_KEY = "rapids.options.v1";
@@ -48,6 +48,58 @@ function normalizeOptions(value) {
     autoScan:
       value !== null && typeof value === "object" && value.autoScan === true,
   };
+}
+
+function cleanText(value, limit) {
+  if (typeof value !== "string") return "";
+  var text = value.replace(/\s+/g, " ").trim();
+  return text.length > limit ? text.slice(0, limit).trim() : text;
+}
+
+function imageUrl(value) {
+  var url = globalThis.RapidsHandoff.normalizeHttpUrl(value);
+  if (url === null) return "";
+  var parsed = new URL(url);
+  parsed.hash = "";
+  return parsed.href;
+}
+
+function normalizePageMeta(value) {
+  var meta = value !== null && typeof value === "object" ? value : {};
+  return {
+    pageTitle: cleanText(meta.pageTitle, 300),
+    siteName: cleanText(meta.siteName, 120),
+    ogTitle: cleanText(meta.ogTitle, 300),
+    twitterTitle: cleanText(meta.twitterTitle, 300),
+    ogImage: imageUrl(meta.ogImage),
+    twitterImage: imageUrl(meta.twitterImage),
+  };
+}
+
+function mergePageMeta(current, incoming) {
+  var left = normalizePageMeta(current);
+  var right = normalizePageMeta(incoming);
+  return {
+    pageTitle: right.pageTitle || left.pageTitle,
+    siteName: right.siteName || left.siteName,
+    ogTitle: right.ogTitle || left.ogTitle,
+    twitterTitle: right.twitterTitle || left.twitterTitle,
+    ogImage: right.ogImage || left.ogImage,
+    twitterImage: right.twitterImage || left.twitterImage,
+  };
+}
+
+function countMediaItems(bucket) {
+  if (bucket === undefined) return 0;
+  return globalThis.RapidsMedia.buildMediaItems(
+    Object.assign(
+      {
+        pageUrl: bucket.pageUrl,
+        candidates: bucket.items,
+      },
+      bucket.meta,
+    ),
+  ).length;
 }
 
 function isStoredItem(value) {
@@ -100,6 +152,20 @@ function normalizeState(value) {
             typeof item.contentType === "string"
               ? item.contentType.slice(0, 120)
               : "",
+          title: cleanText(item.title, 300),
+          poster: imageUrl(item.poster),
+          height:
+            Number.isSafeInteger(item.height) &&
+            item.height >= 144 &&
+            item.height <= 8192
+              ? item.height
+              : null,
+          duration:
+            Number.isFinite(item.duration) &&
+            item.duration > 0 &&
+            item.duration <= 86400
+              ? Math.round(item.duration * 10) / 10
+              : null,
           source:
             item.source === "dom" || item.source === "menu"
               ? item.source
@@ -116,6 +182,7 @@ function normalizeState(value) {
     tabs[String(tabId)] = {
       pageUrl: globalThis.RapidsHandoff.normalizeHttpUrl(bucket.pageUrl) || "",
       updatedAt: Number.isFinite(bucket.updatedAt) ? bucket.updatedAt : now,
+      meta: normalizePageMeta(bucket.meta),
       items: items,
     };
   });
@@ -221,7 +288,14 @@ function readTabSnapshot(tabId) {
   return queueState(function (state) {
     var bucket = state.tabs[String(tabId)];
     if (bucket === undefined) {
-      return { changed: false, value: { pageUrl: "", items: [] } };
+      return {
+        changed: false,
+        value: {
+          pageUrl: "",
+          meta: normalizePageMeta(null),
+          items: [],
+        },
+      };
     }
     var items = bucket.items
       .slice()
@@ -233,7 +307,11 @@ function readTabSnapshot(tabId) {
       });
     return {
       changed: false,
-      value: { pageUrl: bucket.pageUrl, items: items },
+      value: {
+        pageUrl: bucket.pageUrl,
+        meta: Object.assign({}, bucket.meta),
+        items: items,
+      },
     };
   });
 }
@@ -244,11 +322,16 @@ function toPopupItem(item) {
     name: item.name,
     size: item.size,
     kind: item.kind,
+    contentType: item.contentType,
+    title: item.title,
+    poster: item.poster,
+    height: item.height,
+    duration: item.duration,
     sent: item.sentAt !== null,
   };
 }
 
-function mergeCandidates(tabId, pageUrl, candidates, source) {
+function mergeCandidates(tabId, pageUrl, candidates, source, pageMeta) {
   if (!Number.isInteger(tabId) || tabId < 0 || !Array.isArray(candidates)) {
     return Promise.resolve({ added: 0, count: 0 });
   }
@@ -277,6 +360,20 @@ function mergeCandidates(tabId, pageUrl, candidates, source) {
         typeof raw.contentType === "string"
           ? raw.contentType.slice(0, 120)
           : "",
+      title: cleanText(raw.title, 300),
+      poster: imageUrl(raw.poster),
+      height:
+        Number.isSafeInteger(raw.height) &&
+        raw.height >= 144 &&
+        raw.height <= 8192
+          ? raw.height
+          : null,
+      duration:
+        Number.isFinite(raw.duration) &&
+        raw.duration > 0 &&
+        raw.duration <= 86400
+          ? Math.round(raw.duration * 10) / 10
+          : null,
       source: source,
       firstSeen: now,
       lastSeen: now,
@@ -285,7 +382,7 @@ function mergeCandidates(tabId, pageUrl, candidates, source) {
   });
   if (prepared.length === 0) {
     return readTabSnapshot(tabId).then(function (snapshot) {
-      return { added: 0, count: snapshot.items.length };
+      return { added: 0, count: countMediaItems(snapshot) };
     });
   }
   var page = globalThis.RapidsHandoff.normalizeHttpUrl(pageUrl) || "";
@@ -293,10 +390,18 @@ function mergeCandidates(tabId, pageUrl, candidates, source) {
     var key = String(tabId);
     var bucket = state.tabs[key];
     if (bucket === undefined) {
-      bucket = { pageUrl: page, updatedAt: at, items: [] };
+      bucket = {
+        pageUrl: page,
+        updatedAt: at,
+        meta: normalizePageMeta(pageMeta),
+        items: [],
+      };
       state.tabs[key] = bucket;
-    } else if (page !== "" && bucket.pageUrl !== page) {
-      bucket.pageUrl = page;
+    } else {
+      bucket.meta = mergePageMeta(bucket.meta, pageMeta);
+      if (page !== "" && bucket.pageUrl !== page) {
+        bucket.pageUrl = page;
+      }
     }
     var added = 0;
     prepared.forEach(function (candidate) {
@@ -321,15 +426,28 @@ function mergeCandidates(tabId, pageUrl, candidates, source) {
       if (existing.contentType === "" && candidate.contentType !== "") {
         existing.contentType = candidate.contentType;
       }
+      if (existing.title === "" && candidate.title !== "") {
+        existing.title = candidate.title;
+      }
+      if (existing.poster === "" && candidate.poster !== "") {
+        existing.poster = candidate.poster;
+      }
+      if (existing.height === null && candidate.height !== null) {
+        existing.height = candidate.height;
+      }
+      if (existing.duration === null && candidate.duration !== null) {
+        existing.duration = candidate.duration;
+      }
       existing.lastSeen = at;
     });
     bucket.updatedAt = at;
     capState(state, at);
+    var count = countMediaItems(state.tabs[key]);
     return {
       changed: true,
       value: {
         added: added,
-        count: state.tabs[key] === undefined ? 0 : state.tabs[key].items.length,
+        count: count,
       },
     };
   }).then(function (result) {
@@ -409,6 +527,7 @@ function handleCompleted(details) {
           },
         ],
         "network",
+        null,
       );
     })
     .catch(function () {
@@ -427,7 +546,6 @@ function markSent(tabId, url) {
     });
     if (item === undefined) return { changed: false, value: null };
     item.sentAt = now;
-    item.lastSeen = Math.max(item.lastSeen, now);
     bucket.updatedAt = now;
     return { changed: true, value: null };
   });
@@ -588,6 +706,8 @@ function popupPayload(tab) {
       tabId: tab.id,
       pageUrl: snapshot.pageUrl || tab.url || "",
       supported: canUseContent(tab),
+      page: Object.assign({}, snapshot.meta),
+      count: countMediaItems(snapshot),
       items: snapshot.items.map(toPopupItem),
     };
   });
@@ -604,11 +724,13 @@ function popupState() {
           tabId: null,
           pageUrl: "",
           supported: false,
+          page: normalizePageMeta(null),
+          count: 0,
           items: [],
         };
       }
       return popupPayload(tab).then(function (payload) {
-        void setBadge(tab.id, payload.items.length);
+        void setBadge(tab.id, payload.count);
         return Object.assign({ ok: true }, payload);
       });
     });
@@ -646,6 +768,7 @@ function scanActiveTab() {
             tab.url || "",
             reply.candidates,
             "dom",
+            reply.page,
           ).then(function (result) {
             return popupPayload(tab).then(function (payload) {
               return Object.assign({ ok: true, added: result.added }, payload);
@@ -708,6 +831,7 @@ function mergeFromContent(message, sender) {
     sender.tab.url || "",
     Array.isArray(message.candidates) ? message.candidates : [],
     "dom",
+    message.page,
   ).then(function (result) {
     return { ok: true, added: result.added };
   });
@@ -782,7 +906,7 @@ function handleTabNavigation(tabId, url) {
       return readTabSnapshot(tabId);
     })
     .then(function (snapshot) {
-      return setBadge(tabId, snapshot.items.length);
+      return setBadge(tabId, countMediaItems(snapshot));
     });
 }
 
@@ -900,7 +1024,7 @@ chrome.tabs.onRemoved.addListener(function (tabId) {
 chrome.tabs.onActivated.addListener(function (activeInfo) {
   void readTabSnapshot(activeInfo.tabId)
     .then(function (snapshot) {
-      return setBadge(activeInfo.tabId, snapshot.items.length);
+      return setBadge(activeInfo.tabId, countMediaItems(snapshot));
     })
     .catch(function () {
       // The tab may have closed immediately after activation.
@@ -920,7 +1044,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
   if (changeInfo.status === "complete") {
     void readTabSnapshot(tabId)
       .then(function (snapshot) {
-        return setBadge(tabId, snapshot.items.length);
+        return setBadge(tabId, countMediaItems(snapshot));
       })
       .catch(function () {
         // The tab may have closed during loading.
@@ -935,7 +1059,7 @@ chrome.storage.onChanged.addListener(function (changes, area) {
 });
 
 void chrome.action
-  .setBadgeBackgroundColor({ color: "#059669" })
+  .setBadgeBackgroundColor({ color: "#18181b" })
   .catch(function () {
     // Badge styling is cosmetic.
   });

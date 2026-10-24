@@ -80,16 +80,16 @@ function InspectUrlDialog({ onOpen, onClose }: InspectUrlDialogProps) {
         event.preventDefault();
         requestClose();
       }}
-      className="w-[min(30rem,calc(100vw-2rem))] rounded-xl border border-zinc-700 bg-zinc-950 p-0 text-zinc-100 shadow-2xl backdrop:bg-zinc-950/80"
+      className="w-[min(30rem,calc(100vw-2rem))] rounded-xl border border-line-strong bg-canvas p-0 text-ink shadow-2xl backdrop:bg-canvas/80"
     >
       <form onSubmit={onSubmit} noValidate aria-busy={opening}>
-        <div className="border-b border-zinc-800 px-5 py-4">
+        <div className="border-b border-line px-5 py-4">
           <h2 id="inspect-page-title" className="text-[15px] font-semibold">
             Inspect a media page
           </h2>
           <p
             id="inspect-page-description"
-            className="mt-1 text-[12px] leading-relaxed text-zinc-400"
+            className="mt-1 text-[12px] leading-relaxed text-muted"
           >
             Open a page in a separate inspector. Direct media found there is
             suggested in this window; nothing is added automatically.
@@ -99,7 +99,7 @@ function InspectUrlDialog({ onOpen, onClose }: InspectUrlDialogProps) {
           <div>
             <label
               htmlFor="inspect-page-url"
-              className="mb-1.5 block text-[12px] font-medium text-zinc-300"
+              className="mb-1.5 block text-[12px] font-medium text-ink-soft"
             >
               Page URL
             </label>
@@ -113,21 +113,21 @@ function InspectUrlDialog({ onOpen, onClose }: InspectUrlDialogProps) {
                 setError(null);
               }}
               aria-required="true"
-              className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-[13px] text-zinc-100 outline-none transition-colors duration-150 focus:border-emerald-500"
+              className="h-9 w-full rounded-md border border-line-strong bg-panel px-3 text-[13px] text-ink outline-none transition-colors duration-150 focus:border-ink/30"
             />
           </div>
           {error !== null && (
             <p
               role="alert"
-              className="rounded-md border border-red-900/70 bg-red-950/40 px-3 py-2 text-[12px] text-red-200"
+              className="rounded-md border border-ink/70 bg-ink/40 px-3 py-2 text-[12px] text-ink"
             >
               {error}
             </p>
           )}
         </div>
-        <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3">
+        <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
           <Button
-            className="bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+            className="bg-elevated text-ink hover:bg-line-strong"
             onClick={requestClose}
           >
             Close
@@ -209,7 +209,13 @@ export function InspectPageButton() {
             pageUrl={inbox.pageUrl}
             candidates={inbox.candidates}
             onDismiss={() => setInbox((current) => dismissSniffInbox(current))}
-            onSelect={(candidate) => {
+            onSelect={(selection) => {
+              const candidate = inbox.candidates.find(
+                (item) =>
+                  item.url === selection.url &&
+                  item.source === selection.source,
+              );
+              if (candidate === undefined) return;
               const choice = selectSniffCandidate(inbox, candidate);
               if (choice.url !== null) {
                 setInbox(choice.inbox);

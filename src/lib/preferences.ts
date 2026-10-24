@@ -4,6 +4,7 @@ import { isAbsoluteFolder } from "./addDraft";
 const CATEGORY_DIRS_KEY = "rapids.categoryDirs.v1";
 const WORKSPACE_KEY = "rapids.workspace.v1";
 const DEEP_LINK_CONFIRM_KEY = "rapids.deeplinkConfirm.v1";
+const THEME_KEY = "rapids.theme.v1";
 
 export type CategoryDirs = Partial<Record<TagId, string>>;
 
@@ -121,6 +122,35 @@ export function writeDeepLinkConfirm(confirm: boolean): void {
     localStorage.setItem(DEEP_LINK_CONFIRM_KEY, confirm ? "true" : "false");
   } catch {
     // Storage can be unavailable; the in-memory setting still applies.
+  }
+}
+
+export type ThemeChoice = "system" | "light" | "dark";
+
+export function readTheme(): ThemeChoice {
+  try {
+    const raw = localStorage.getItem(THEME_KEY);
+    return raw === "light" || raw === "dark" ? raw : "system";
+  } catch {
+    return "system";
+  }
+}
+
+/** Applies the preference to the document; "system" follows the OS. */
+export function applyTheme(theme: ThemeChoice): void {
+  const root = document.documentElement;
+  if (theme === "system") {
+    delete root.dataset.theme;
+  } else {
+    root.dataset.theme = theme;
+  }
+}
+
+export function writeTheme(theme: ThemeChoice): void {
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // Storage can be unavailable; the current session still uses the theme.
   }
 }
 

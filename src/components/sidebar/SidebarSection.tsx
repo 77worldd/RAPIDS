@@ -22,7 +22,7 @@ export function SidebarSection({
   return (
     <section className="px-2.5 py-1">
       {!collapsed && (
-        <h3 className="px-2.5 pb-1.5 pt-2 text-[9.5px] font-semibold uppercase tracking-[0.13em] text-zinc-600">
+        <h3 className="px-2.5 pb-1.5 pt-2 text-[9.5px] font-semibold uppercase tracking-[0.13em] text-faint">
           {title}
         </h3>
       )}

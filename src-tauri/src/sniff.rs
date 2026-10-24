@@ -12,11 +12,15 @@ use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindow, Webview
 pub const EVENT: &str = "rapids://sniff-candidate";
 const WINDOW: &str = "media-inspector";
 const TITLE_PREFIX: &str = "__RAPIDS_MEDIA_SNIFF__:";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const MAX_TITLE_BYTES: usize = 8 * 1024;
 const MAX_URL_BYTES: usize = 2048;
 const MAX_CANDIDATES: usize = 16;
 const MAX_REPORTS: usize = 64;
+const MAX_TEXT_CHARS: usize = 300;
+const MAX_SITE_CHARS: usize = 120;
+const MAX_HEIGHT: u32 = 8192;
+const MAX_DURATION_SECONDS: f64 = 604_800.0;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -29,6 +33,21 @@ enum Source {
     Navigation,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+struct Meta {
+    title: Option<String>,
+    poster: Option<String>,
+    height: Option<u32>,
+    duration: Option<f64>,
+    page_title: Option<String>,
+    site_name: Option<String>,
+    og_title: Option<String>,
+    twitter_title: Option<String>,
+    og_image: Option<String>,
+    twitter_image: Option<String>,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Candidate {
@@ -36,6 +55,7 @@ struct Candidate {
     page_url: String,
     url: String,
     source: Source,
+    meta: Meta,
 }
 
 #[derive(Deserialize)]
@@ -46,12 +66,15 @@ struct TitleReport {
     page: String,
     url: String,
     source: Source,
+    #[serde(default)]
+    meta: Meta,
 }
 
 struct Report {
     page: Url,
     url: Url,
     source: Source,
+    meta: Meta,
 }
 
 struct Inspection {
@@ -80,6 +103,43 @@ fn without_fragment(url: &Url) -> Url {
     let mut url = url.clone();
     url.set_fragment(None);
     url
+}
+
+fn clean_text(value: Option<String>, limit: usize) -> Option<String> {
+    let text = value?;
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+    Some(collapsed.chars().take(limit).collect())
+}
+
+fn clean_image(value: Option<String>) -> Option<String> {
+    let raw = value?;
+    let mut url = http_url(&raw)?;
+    url.set_fragment(None);
+    Some(url.to_string())
+}
+
+/// Page metadata is untrusted DOM input. Clamp every field before it crosses
+/// the webview boundary; a bad optional field is dropped, not trusted.
+fn normalize_meta(meta: Meta) -> Meta {
+    Meta {
+        title: clean_text(meta.title, MAX_TEXT_CHARS),
+        poster: clean_image(meta.poster),
+        height: meta
+            .height
+            .filter(|height| (1..=MAX_HEIGHT).contains(height)),
+        duration: meta.duration.filter(|duration| {
+            duration.is_finite() && *duration > 0.0 && *duration <= MAX_DURATION_SECONDS
+        }),
+        page_title: clean_text(meta.page_title, MAX_TEXT_CHARS),
+        site_name: clean_text(meta.site_name, MAX_SITE_CHARS),
+        og_title: clean_text(meta.og_title, MAX_TEXT_CHARS),
+        twitter_title: clean_text(meta.twitter_title, MAX_TEXT_CHARS),
+        og_image: clean_image(meta.og_image),
+        twitter_image: clean_image(meta.twitter_image),
+    }
 }
 
 fn media_path(url: &Url) -> bool {
@@ -119,6 +179,7 @@ fn parse_title(title: &str, session: u64) -> Option<Report> {
         page,
         url,
         source: report.source,
+        meta: normalize_meta(report.meta),
     })
 }
 
@@ -137,7 +198,7 @@ impl Inspection {
         self.seen.clear();
         self.reports = 0;
         if media_path(url) {
-            self.record(without_fragment(url), Source::Navigation)
+            self.record(without_fragment(url), Source::Navigation, Meta::default())
         } else {
             None
         }
@@ -162,10 +223,10 @@ impl Inspection {
         {
             return None;
         }
-        self.record(report.url.clone(), report.source)
+        self.record(report.url.clone(), report.source, report.meta.clone())
     }
 
-    fn record(&mut self, url: Url, source: Source) -> Option<Candidate> {
+    fn record(&mut self, url: Url, source: Source, meta: Meta) -> Option<Candidate> {
         let page_url = self.page.as_ref()?.as_str().to_owned();
         if self.seen.len() >= MAX_CANDIDATES || !self.seen.insert(url.as_str().to_owned()) {
             return None;
@@ -175,6 +236,7 @@ impl Inspection {
             page_url,
             url: url.to_string(),
             source,
+            meta,
         })
     }
 }
@@ -190,6 +252,7 @@ fn initialization_script(session: u64) -> String {
   const pending = [];
   let timer = 0;
   let scanScheduled = false;
+  let pageTitle = cleanText(document.title, 300);
   const direct = /\.(mp4|webm|m4v|mov|mkv)$/i;
   const manifest = /\.(m3u8|mpd)$/i;
 
@@ -200,7 +263,73 @@ fn initialization_script(session: u64) -> String {
     timer = window.setTimeout(deliver, 200);
   }
 
-  function suggest(value, source) {
+  function cleanText(value, limit) {
+    if (typeof value !== "string") return null;
+    const text = value.replace(/\s+/g, " ").trim();
+    if (!text) return null;
+    return text.length > limit ? text.slice(0, limit).trim() : text;
+  }
+
+  function absoluteHttp(value) {
+    if (typeof value !== "string" || !value) return null;
+    try {
+      const url = new URL(value, document.baseURI);
+      if (!/^https?:$/.test(url.protocol) || url.username || url.password) return null;
+      url.hash = "";
+      return url.href.length <= 2048 ? url.href : null;
+    } catch { return null; }
+  }
+
+  function metaContent(names) {
+    for (const name of names) {
+      const node = document.querySelector(`meta[property="${name}"]`) ||
+                   document.querySelector(`meta[name="${name}"]`);
+      const content = node && node.getAttribute("content");
+      if (content && content.trim()) return content;
+    }
+    return null;
+  }
+
+  function currentPageTitle() {
+    // The delivery channel writes a formatted document title. Never let that
+    // value become the page title on a later scan.
+    if (!document.title.startsWith(prefix)) {
+      pageTitle = cleanText(document.title, 300);
+    }
+    return pageTitle;
+  }
+
+  function pageMeta() {
+    return {
+      title: null,
+      poster: null,
+      height: null,
+      duration: null,
+      pageTitle: currentPageTitle(),
+      siteName: cleanText(metaContent(["og:site_name"]), 120),
+      ogTitle: cleanText(metaContent(["og:title"]), 300),
+      twitterTitle: cleanText(metaContent(["twitter:title"]), 300),
+      ogImage: absoluteHttp(metaContent(["og:image"])),
+      twitterImage: absoluteHttp(metaContent(["twitter:image"]))
+    };
+  }
+
+  function videoMeta(video) {
+    const meta = pageMeta();
+    meta.title = cleanText(
+      video.getAttribute("title") || video.getAttribute("aria-label"), 300);
+    meta.poster = absoluteHttp(
+      video.getAttribute("poster") || video.poster);
+    const height = Number(video.videoHeight);
+    meta.height = Number.isInteger(height) && height > 0 && height <= 8192
+      ? height : null;
+    const duration = Number(video.duration);
+    meta.duration = Number.isFinite(duration) && duration > 0 && duration <= 604800
+      ? duration : null;
+    return meta;
+  }
+
+  function suggest(value, source, meta) {
     if (!value || seen.size >= 16) return;
     try {
       const candidate = new URL(value, document.baseURI);
@@ -212,9 +341,12 @@ fn initialization_script(session: u64) -> String {
       page.hash = "";
       if (candidate.href.length > 2048 || page.href.length > 2048 ||
           seen.has(candidate.href)) return;
-      const report = { version: 1, session, page: page.href,
-                       url: candidate.href, source };
-      if ((prefix + JSON.stringify(report)).length > 8192) return;
+      const report = { version: 2, session, page: page.href,
+                       url: candidate.href, source, meta };
+      const serialized = prefix + JSON.stringify(report);
+      const bytes = typeof TextEncoder === "function"
+        ? new TextEncoder().encode(serialized).length : serialized.length;
+      if (bytes > 8192) return;
       seen.add(candidate.href);
       pending.push(report);
       if (!timer) deliver();
@@ -223,14 +355,16 @@ fn initialization_script(session: u64) -> String {
 
   function scan() {
     for (const video of document.querySelectorAll("video")) {
-      suggest(video.currentSrc, "video");
-      suggest(video.getAttribute("src"), "video");
+      const meta = videoMeta(video);
+      suggest(video.currentSrc, "video", meta);
+      suggest(video.getAttribute("src"), "video", meta);
       for (const source of video.querySelectorAll("source[src]")) {
-        suggest(source.getAttribute("src"), "videoSource");
+        suggest(source.getAttribute("src"), "videoSource", meta);
       }
     }
+    const linksMeta = pageMeta();
     for (const link of document.querySelectorAll("a[href]")) {
-      suggest(link.getAttribute("href"), "link");
+      suggest(link.getAttribute("href"), "link", linksMeta);
     }
   }
 
@@ -391,7 +525,7 @@ mod tests {
         format!(
             "{TITLE_PREFIX}{}",
             serde_json::json!({
-                "version": 1,
+                "version": 2,
                 "session": session,
                 "page": page,
                 "url": url,
@@ -406,6 +540,7 @@ mod tests {
             page: Url::parse(PAGE).unwrap(),
             url: Url::parse(TRAILER).unwrap(),
             source: Source::Link,
+            meta: Meta::default(),
         };
         for script in [initialization_script(1), verification_script(&report)] {
             assert!(script.contains("document.querySelectorAll(\"a[href]\")"));
@@ -433,13 +568,87 @@ mod tests {
         let valid = title(4, PAGE, MEDIA, "video");
         assert!(parse_title(&valid, 4).is_some());
         assert!(parse_title("An ordinary page title", 4).is_none());
-        assert!(parse_title(&valid.replace("\"version\":1", "\"version\":2"), 4).is_none());
-        let extra = valid.replace("\"version\":1", "\"version\":1,\"extra\":true");
+        assert!(parse_title(&valid.replace("\"version\":2", "\"version\":3"), 4).is_none());
+        let extra = valid.replace("\"version\":2", "\"version\":2,\"extra\":true");
         assert!(parse_title(&extra, 4).is_none());
         let other_source = valid.replace("\"source\":\"video\"", "\"source\":\"other\"");
         assert!(parse_title(&other_source, 4).is_none());
         assert!(parse_title(&format!("{valid}garbage"), 4).is_none());
         assert!(parse_title(&"x".repeat(MAX_TITLE_BYTES + 1), 4).is_none());
+    }
+
+    #[test]
+    fn page_metadata_is_clamped_and_invalid_fields_are_dropped() {
+        let report = parse_title(
+            &format!(
+                "{TITLE_PREFIX}{}",
+                serde_json::json!({
+                    "version": 2,
+                    "session": 4,
+                    "page": PAGE,
+                    "url": MEDIA,
+                    "source": "video",
+                    "meta": {
+                        "title": "  Chapter   One  ",
+                        "poster": "http://127.0.0.1:53001/poster.png#fragment",
+                        "height": 1080,
+                        "duration": 91.5,
+                        "pageTitle": "The Movie (2024) - Example Site",
+                        "siteName": "Example Site",
+                        "ogTitle": "The Movie (2024)",
+                        "twitterTitle": "The Movie (2024)",
+                        "ogImage": "javascript:alert(1)",
+                        "twitterImage": "http://127.0.0.1:53001/twitter.png"
+                    }
+                })
+            ),
+            4,
+        )
+        .unwrap();
+        assert_eq!(report.meta.title.as_deref(), Some("Chapter One"));
+        assert_eq!(
+            report.meta.poster.as_deref(),
+            Some("http://127.0.0.1:53001/poster.png")
+        );
+        assert_eq!(report.meta.height, Some(1080));
+        assert_eq!(report.meta.duration, Some(91.5));
+        assert_eq!(report.meta.og_title.as_deref(), Some("The Movie (2024)"));
+        assert_eq!(report.meta.og_image, None);
+        assert_eq!(
+            report.meta.twitter_image.as_deref(),
+            Some("http://127.0.0.1:53001/twitter.png")
+        );
+
+        let invalid = parse_title(
+            &format!(
+                "{TITLE_PREFIX}{}",
+                serde_json::json!({
+                    "version": 2,
+                    "session": 4,
+                    "page": PAGE,
+                    "url": MEDIA,
+                    "source": "video",
+                    "meta": { "height": 9000, "duration": 604801.0 }
+                })
+            ),
+            4,
+        )
+        .unwrap();
+        assert_eq!(invalid.meta.height, None);
+        assert_eq!(invalid.meta.duration, None);
+
+        let unknown = format!(
+            "{TITLE_PREFIX}{}",
+            serde_json::json!({
+                "version": 2,
+                "session": 4,
+                "page": PAGE,
+                "url": MEDIA,
+                "source": "video",
+                "meta": { "unexpected": true }
+            })
+        );
+        assert!(parse_title(&unknown, 4).is_none());
     }
 
     #[test]
